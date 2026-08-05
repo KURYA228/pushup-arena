@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "node --test 'src/**/*.test.ts'",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "./scripts/deploy-pages.sh"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
