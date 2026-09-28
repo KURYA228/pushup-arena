@@ -4,6 +4,9 @@
  *
  *   node scripts/import-boss-icons.mjs <папка-с-исходными-png>
  *
+ * Ожидает по файлу на каждого противника, названному его отображаемым именем: «Оскал.png»,
+ * «Шестёрка.png» и так далее. Чего нет — просто пропускается, приложение рисует силуэт.
+ *
  * The generator emits one file per boss, named in Russian, with the caption ("1. Хват") baked
  * into the bottom of the image and a varying amount of black padding around the art. Cropping a
  * fixed fraction doesn't work — the caption sits anywhere between 75% and 83% of the height
@@ -16,10 +19,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { BOSSES } from '../src/data/bosses.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'public', 'bosses');
@@ -28,21 +32,27 @@ const MAX_DIM = 320;
 // in CSS), and the service worker precaches every icon — 240KB per PNG vs ~57KB per JPEG.
 const JPEG_QUALITY = 85;
 
-/** Source basename (without .png) → destination basename, in BOSSES order. */
-const MAP = [
-  ['Хват', '01-grunt'],
-  ['Кувалда', '02-brawler'],
-  ['Ярость', '03-berserker'],
-  ['Страж стали', '04-steelguard'],
-  ['Тень ярости', '05-wraith'],
-  ['Титан', '06-titanprime'],
-  ['Молот Бездны', '07-voidhammer'],
-  ['Железная пасть', '08-ironmaw'],
-  ['Багровый царь', '09-bloodking'],
-  ['Грозоворожденный', '10-stormborn'],
-  ['Крушитель мира', '11-worldbreaker'],
-  ['Апекс', '12-apex'],
-];
+/**
+ * Source basename (without extension) → destination basename.
+ *
+ * Built from BOSSES so it can never drift from the roster: every boss and every minion gets a
+ * slot, named after what's displayed in the app. Destination names use the boss `id`, which no
+ * longer resembles the display name — the profile stores victories by id, so ids can't be
+ * renamed even when the names change.
+ */
+const MAP = BOSSES.flatMap((boss, i) => {
+  const n = String(i + 1).padStart(2, '0');
+  return [
+    [boss.name, `${n}-${boss.id}`],
+    ...boss.minions.map((m, j) => [m.name, `${n}-${boss.id}-m${j + 1}`]),
+  ];
+});
+
+const duplicates = MAP.map(([from]) => from).filter((v, i, all) => all.indexOf(v) !== i);
+if (duplicates.length) {
+  console.error(`Одинаковые имена противников — файлы перезатрут друг друга: ${duplicates.join(', ')}`);
+  process.exit(1);
+}
 
 const sips = (...args) => execFileSync('/usr/bin/sips', args, { encoding: 'utf8' });
 
@@ -143,15 +153,24 @@ if (!srcDir) {
 
 mkdirSync(OUT, { recursive: true });
 const tmp = mkdtempSync(join(tmpdir(), 'boss-icons-'));
+const missing = [];
+let done = 0;
 
 try {
   for (const [from, to] of MAP) {
     const src = join(srcDir, `${from}.png`);
+    // `sips` treats a missing input as a warning and exits 0, so the absence has to be caught
+    // here — otherwise it surfaces much later as a crash reading a BMP that was never written.
+    if (!existsSync(src)) {
+      missing.push(from);
+      continue;
+    }
     const bmp = join(tmp, `${to}.bmp`);
     try {
       sips('-s', 'format', 'bmp', src, '--out', bmp);
+      if (!existsSync(bmp)) throw new Error('no output');
     } catch {
-      console.error(`  ПРОПУЩЕН ${from} — не удалось прочитать ${src}`);
+      console.error(`  ОШИБКА ${from} — не удалось прочитать ${src}`);
       continue;
     }
 
@@ -178,9 +197,14 @@ try {
     console.log(
       `  ${to} ← ${basename(src)}  ${img.width}x${img.height} → квадрат ${side} @ ${offX},${offY}  (${captioned})`,
     );
+    done += 1;
   }
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
 
-console.log('Готово.');
+console.log(`\nГотово: перенесено ${done} из ${MAP.length}.`);
+if (missing.length) {
+  console.log(`Нет файлов (${missing.length}): ${missing.join(', ')}`);
+  console.log('Для них приложение рисует силуэт — можно доносить по частям.');
+}

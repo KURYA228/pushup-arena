@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import type { BossDef, BossStatus } from '../data/bosses';
 import { BOSSES } from '../data/bosses';
+import { abilityName, describeAbility } from '../data/abilities';
 import { BossIcon } from './BossIcon';
 
 /** Full-height card for a single boss: the figure at a size worth looking at, plus its line. */
@@ -83,7 +84,23 @@ export function BossProfileModal({
           «{boss.phrase}»
         </blockquote>
 
-        <div className="mt-4 grid grid-cols-2 gap-2 text-left">
+        <div className="mt-3 space-y-1.5 text-left">
+          {boss.abilities.map((a) => (
+            <div key={a.kind} className="rounded-xl border border-arena-amber/30 bg-arena-surface-2 px-3 py-2">
+              <p className="text-[11px] font-semibold text-arena-amber">{abilityName(a)}</p>
+              <p className="text-[11px] leading-snug text-arena-text-dim">{describeAbility(a)}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 rounded-xl border border-arena-border bg-arena-surface-2 px-3 py-2 text-left">
+          <p className="text-[10px] uppercase text-arena-text-dim">до него придётся пройти</p>
+          <p className="mt-0.5 text-xs text-arena-text">
+            {boss.minions.map((m) => m.name).join(' · ')}
+          </p>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 text-left">
           <Stat label="здоровье" value={`${boss.hp} HP`} />
           <Stat label="шанс крита" value={`${Math.round(boss.critChance * 100)}%`} />
         </div>

@@ -4,7 +4,7 @@ import { ChevronRight, Flame, Trophy } from 'lucide-react';
 import type { ProfileRecord } from '../types';
 import type { useProfile } from '../hooks/useProfile';
 import { ACHIEVEMENTS } from '../data/achievements';
-import { BOSSES, bossStatusAt } from '../data/bosses';
+import { BOSSES, bossStatusAt, stageProgressLabel } from '../data/bosses';
 import { AchievementGrid } from './AchievementGrid';
 import { BossIcon } from './BossIcon';
 import { BossGallery } from './BossGallery';
@@ -117,7 +117,7 @@ export function HomeView({
           <div className="min-w-0 flex-1">
             <p className="flex items-center gap-1 text-sm text-arena-text-dim">
               <span className="truncate">
-                {derived.boss.name} — {derived.boss.title}
+                {derived.enemy.name}{derived.enemy.isBoss ? '' : ` — подчинённый ${derived.boss.nameGenitive}`}
               </span>
               <ChevronRight size={14} className="shrink-0 text-arena-amber" />
             </p>
@@ -126,11 +126,11 @@ export function HomeView({
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-arena-surface-2">
                   <div
                     className="h-full rounded-full bg-arena-red"
-                    style={{ width: `${Math.max(0, Math.min(100, (profile.bossHp / derived.boss.hp) * 100))}%` }}
+                    style={{ width: `${Math.max(0, Math.min(100, (profile.enemyHp / Math.max(1, derived.enemy.hp)) * 100))}%` }}
                   />
                 </div>
                 <p className="mt-1 text-[11px] tabular-nums text-arena-text-dim">
-                  повержено {profile.bossesDefeated.length} из {BOSSES.length}
+                  {stageProgressLabel(derived.stageStep)} · этап {derived.bossIndex + 1} из {BOSSES.length}
                 </p>
               </>
             ) : (
@@ -166,7 +166,7 @@ export function HomeView({
           <BossProfileModal
             boss={openBoss}
             index={openIndex}
-            hpLeft={profile.bossHp}
+            hpLeft={derived.stageStep >= 3 ? profile.enemyHp : derived.boss.hp}
             status={bossStatusAt(openIndex, derived.bossIndex, profile.bossesDefeated)}
             onClose={() => setOpenIndex(null)}
           />

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import type { ProfileRecord } from '../types';
-import { BOSSES } from '../data/bosses';
+import { BOSSES, BOSS_STEP, encounterAt } from '../data/bosses';
+import { freshFight } from '../data/combat';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { totalXpForLevel } from '../data/leveling';
 import { BossIcon } from './BossIcon';
@@ -42,13 +43,22 @@ export function DevPanel({
     return l;
   })();
 
-  /** Jumping to boss N implies you got there honestly — mark everything before it as defeated. */
-  const jumpToBoss = (index: number) =>
+  /**
+   * Jumping to stage N implies you got there honestly — mark everything before it as defeated.
+   * The fight state has to be rebuilt too: it carries the enemy's max HP and the timestamps the
+   * stateful abilities measure against, and leaving them pointing at the previous opponent
+   * corrupts every rule that reads them.
+   */
+  const jumpToStage = (index: number, step: number) => {
+    const hp = encounterAt(BOSSES[index], step).hp;
     void patch({
       currentBossIndex: index,
-      bossHp: BOSSES[index].hp,
+      stageStep: step,
+      enemyHp: hp,
+      fight: freshFight(hp),
       bossesDefeated: BOSSES.slice(0, index).map((b) => b.id),
     });
+  };
 
   return (
     <motion.div
@@ -84,13 +94,15 @@ export function DevPanel({
           Пишет в профиль напрямую, минуя правила игры.
         </p>
 
-        <Group title={`Босс — сейчас ${profile.currentBossIndex + 1} из ${BOSSES.length}`}>
+        <Group
+          title={`Этап ${profile.currentBossIndex + 1} из ${BOSSES.length}, шаг ${profile.stageStep + 1} из ${BOSS_STEP + 1}`}
+        >
           <div className="grid grid-cols-4 gap-1.5">
             {BOSSES.map((boss, i) => (
               <button
                 key={boss.id}
-                onClick={() => jumpToBoss(i)}
-                aria-label={`Перейти к боссу ${boss.name}`}
+                onClick={() => jumpToStage(i, 0)}
+                aria-label={`Перейти к этапу ${boss.name}`}
                 className={`flex flex-col items-center rounded-lg border py-1.5 ${
                   i === profile.currentBossIndex
                     ? 'border-arena-amber/60 bg-arena-surface-2'
@@ -103,11 +115,11 @@ export function DevPanel({
             ))}
           </div>
           <Row>
-            <Action onClick={() => void patch({ bossHp: BOSSES[profile.currentBossIndex].baseDamage })}>
-              Оставить 1 удар
-            </Action>
-            <Action onClick={() => void patch({ bossHp: BOSSES[profile.currentBossIndex].hp })}>
-              Полное HP
+            {/* 1 HP, not baseDamage: armour makes a rep land for less than the base, so setting
+                it to the base left the enemy alive on 1 HP and needing a second hit. */}
+            <Action onClick={() => void patch({ enemyHp: 1 })}>Оставить 1 удар</Action>
+            <Action onClick={() => jumpToStage(profile.currentBossIndex, BOSS_STEP)}>
+              Сразу к боссу
             </Action>
           </Row>
         </Group>

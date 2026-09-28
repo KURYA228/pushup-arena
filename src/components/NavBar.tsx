@@ -1,12 +1,13 @@
-import { Home, Swords, Zap } from 'lucide-react';
+import { Home, Swords, Trophy, Zap } from 'lucide-react';
 import clsx from 'clsx';
 
-export type ViewId = 'home' | 'boss' | 'rush';
+export type ViewId = 'home' | 'boss' | 'rush' | 'board';
 
 const TABS: { id: ViewId; label: string; icon: typeof Home }[] = [
   { id: 'home', label: 'Дом', icon: Home },
   { id: 'boss', label: 'Боссы', icon: Swords },
   { id: 'rush', label: 'Rush', icon: Zap },
+  { id: 'board', label: 'Лидеры', icon: Trophy },
 ];
 
 export function NavBar({ current, onChange }: { current: ViewId; onChange: (v: ViewId) => void }) {

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Timer, Trophy, Zap } from 'lucide-react';
-import type { ProfileRecord, RepResult, ToastKind } from '../types';
+import type { ProfileRecord, RepResult, RepUndo, ToastKind } from '../types';
+import type { Feedback } from '../hooks/useFeedback';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { CameraPanel } from './CameraPanel';
 
@@ -13,14 +14,16 @@ type SessionState = 'idle' | 'running' | 'finished';
 export function RushView({
   profile,
   registerRushRep,
-  revertRushRep,
+  revertRep,
   finishRush,
+  feedback,
   notify,
 }: {
   profile: ProfileRecord;
   registerRushRep: () => Promise<RepResult>;
-  revertRushRep: (r: RepResult) => Promise<void>;
+  revertRep: (u: RepUndo) => Promise<void>;
   finishRush: (reps: number, bestCombo: number) => Promise<{ isNewRecord: boolean; newAchievements: string[] }>;
+  feedback: Feedback;
   notify: (kind: ToastKind, title: string, description?: string) => void;
 }) {
   const [state, setState] = useState<SessionState>('idle');
@@ -30,7 +33,8 @@ export function RushView({
   const [bestComboSession, setBestComboSession] = useState(1);
 
   const lastRepAtRef = useRef(0);
-  const lastResultRef = useRef<RepResult | null>(null);
+  const undoStackRef = useRef<RepUndo[]>([]);
+  const [undoDepth, setUndoDepth] = useState(0);
   const repsRef = useRef(0);
   const bestComboRef = useRef(1);
   const busyRef = useRef(false);
@@ -63,13 +67,15 @@ export function RushView({
     repsRef.current = 0;
     bestComboRef.current = 1;
     lastRepAtRef.current = 0;
-    lastResultRef.current = null;
+    undoStackRef.current = [];
+    setUndoDepth(0);
     setTimeLeft(DURATION_S);
     setState('running');
   };
 
   const endSession = async () => {
     setState('finished');
+    feedback.rushEnd();
     const { isNewRecord, newAchievements } = await finishRush(repsRef.current, bestComboRef.current);
     if (isNewRecord && repsRef.current > 0) {
       notify('record', 'Новый личный рекорд!', `${repsRef.current} повторов за 60 секунд`);
@@ -100,7 +106,11 @@ export function RushView({
       });
 
       const result = await registerRushRep();
-      lastResultRef.current = result;
+      undoStackRef.current.push(result.undo);
+      setUndoDepth(undoStackRef.current.length);
+      // Same rule as the arena: the level-up chime replaces the rep beep instead of piling on it.
+      if (result.leveledUp) feedback.levelUp();
+      else feedback.rep();
       if (result.leveledUp) notify('level-up', `Новый уровень: ${result.newLevel}`);
       for (const id of result.newAchievements) {
         const def = ACHIEVEMENTS.find((a) => a.id === id);
@@ -112,18 +122,19 @@ export function RushView({
   };
 
   const handleUndo = async () => {
-    if (state !== 'running' || reps === 0) return;
-    const last = lastResultRef.current;
+    if (state !== 'running') return;
+    // Pop first: the on-screen counter used to drop even when there was nothing left to revert,
+    // so the number and the saved progress drifted apart.
+    const last = undoStackRef.current.pop();
+    setUndoDepth(undoStackRef.current.length);
+    if (!last) return;
     setReps((r) => {
       const nr = Math.max(0, r - 1);
       repsRef.current = nr;
       return nr;
     });
     setCombo(1);
-    if (last) {
-      await revertRushRep(last);
-      lastResultRef.current = null;
-    }
+    await revertRep(last);
   };
 
   return (
@@ -190,7 +201,7 @@ export function RushView({
         </div>
       )}
 
-      {state === 'running' && <CameraPanel onRep={handleRep} onUndo={handleUndo} />}
+      {state === 'running' && <CameraPanel onRep={handleRep} onUndo={handleUndo} canUndo={undoDepth > 0} feedback={feedback} />}
     </div>
   );
 }

@@ -21,7 +21,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'streak_30', title: 'Железная воля', description: 'Стрик 30 дней подряд', emoji: '🗓️', check: (p) => p.streak >= 30 },
   { id: 'first_boss', title: 'Первая победа', description: 'Побеждён первый босс', emoji: '⚔️', check: (p) => p.bossesDefeated.length >= 1 },
   { id: 'halfway', title: 'На полпути', description: 'Побеждена половина боссов арены', emoji: '🛡️', check: (p) => p.bossesDefeated.length >= Math.floor(BOSSES.length / 2) },
-  { id: 'bonecrusher', title: 'Костолом', description: 'Побеждено 9 боссов', emoji: '☠️', check: (p) => p.bossesDefeated.length >= 9 },
+  { id: 'bonecrusher', title: 'Костолом', description: 'Побеждено 12 боссов', emoji: '☠️', check: (p) => p.bossesDefeated.length >= 12 },
   { id: 'arena_champion', title: 'Чемпион арены', description: 'Все боссы повержены', emoji: '👑', check: (p) => p.bossesDefeated.length >= BOSSES.length },
   { id: 'rush_20', title: 'Спринтер', description: '20 повторов за один Speed Rush', emoji: '⚡', check: (p) => p.rushBestReps >= 20 },
   { id: 'rush_40', title: 'Скорость света', description: '40 повторов за один Speed Rush', emoji: '💫', check: (p) => p.rushBestReps >= 40 },

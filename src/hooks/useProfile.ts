@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, PROFILE_ID } from '../db/db';
-import type { ProfileRecord, RepResult } from '../types';
+import type { ProfileRecord, RepResult, RepUndo } from '../types';
 import { RUSH_XP_PER_REP, XP_PER_REP, levelFromTotalXp, streakMultiplier } from '../data/leveling';
 import { getRank } from '../data/ranks';
-import { BOSSES, getBossBonusXp } from '../data/bosses';
+import {
+  BOSSES,
+  BOSS_STEP,
+  encounterAt,
+  getBossBonusXp,
+  getMinionBonusXp,
+} from '../data/bosses';
+import { applyIdleRegen, freshFight, resolveArenaRep } from '../data/combat';
 import { checkNewAchievements } from '../data/achievements';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -22,7 +29,9 @@ function defaultProfile(): ProfileRecord {
     streak: 0,
     lastWorkoutDate: null,
     currentBossIndex: 0,
-    bossHp: BOSSES[0].hp,
+    stageStep: 0,
+    enemyHp: BOSSES[0].minions[0].hp,
+    fight: freshFight(BOSSES[0].minions[0].hp),
     bossesDefeated: [],
     achievementsUnlocked: [],
     rushBestReps: 0,
@@ -31,9 +40,29 @@ function defaultProfile(): ProfileRecord {
   };
 }
 
+/**
+ * Brings a save written before stages had minions up to date: such a profile has `bossHp` and no
+ * `stageStep`. It's dropped straight onto the boss with the HP it had, rather than being sent
+ * back through minions it never signed up for.
+ */
+function migrate(p: ProfileRecord): ProfileRecord {
+  const hasStage = typeof p.stageStep === 'number' && typeof p.enemyHp === 'number';
+  if (hasStage && p.fight) return p;
+
+  const index = Math.min(p.currentBossIndex ?? 0, BOSSES.length - 1);
+  const boss = BOSSES[index];
+  const stageStep = hasStage ? p.stageStep : BOSS_STEP;
+  const enemyHp = hasStage ? p.enemyHp : Math.min(p.bossHp ?? boss.hp, boss.hp);
+  return { ...p, stageStep, enemyHp, fight: p.fight ?? freshFight(enemyHp) };
+}
+
 async function ensureProfile(): Promise<ProfileRecord> {
   const existing = await db.profile.get(PROFILE_ID);
-  if (existing) return existing;
+  if (existing) {
+    const migrated = migrate(existing);
+    if (migrated !== existing) await db.profile.put(migrated);
+    return migrated;
+  }
   const fresh = defaultProfile();
   await db.profile.put(fresh);
   return fresh;
@@ -60,35 +89,40 @@ export function useProfile() {
     const rank = getRank(levelInfo.level);
     const bossIndex = Math.min(profile.currentBossIndex, BOSSES.length - 1);
     const boss = BOSSES[bossIndex];
+    const stageStep = profile.stageStep ?? BOSS_STEP;
+    const enemy = encounterAt(boss, stageStep);
     const allBossesDefeated = profile.bossesDefeated.length >= BOSSES.length;
-    return { ...levelInfo, rank, boss, bossIndex, allBossesDefeated };
+    return { ...levelInfo, rank, boss, bossIndex, stageStep, enemy, allBossesDefeated };
   }, [profile]);
 
-  /** One rep in Boss mode: adds XP + pushup count, deals damage to the current boss, handles boss defeat. */
+  /**
+   * One rep in Arena mode. All the rules live in {@link resolveArenaRep}; this only supplies the
+   * clock and the crit roll, then folds the outcome into the profile.
+   */
   const registerBossRep = useCallback(async (): Promise<RepResult> => {
     const p = await ensureProfile();
     const bossIndex = Math.min(p.currentBossIndex, BOSSES.length - 1);
     const boss = BOSSES[bossIndex];
-    const isCrit = Math.random() < boss.critChance;
-    const damage = Math.round(boss.baseDamage * (isCrit ? boss.critMultiplier : 1));
+
+    const outcome = resolveArenaRep(
+      {
+        bossIndex,
+        stageStep: p.stageStep,
+        enemyHp: p.enemyHp,
+        bossesDefeated: p.bossesDefeated,
+        fight: p.fight,
+      },
+      Date.now(),
+      Math.random(),
+    );
+
     const streak = nextStreak(p);
-    const xpGained = Math.round(XP_PER_REP * streakMultiplier(streak));
+    const xpGained = Math.round(XP_PER_REP * streakMultiplier(streak) * outcome.xpFactor);
     const beforeLevel = levelFromTotalXp(p.totalXp).level;
 
-    let bossHp = p.bossHp - damage;
-    let currentBossIndex = p.currentBossIndex;
-    let bossesDefeated = p.bossesDefeated;
     let bonusXp = 0;
-    let bossDefeated = false;
-
-    if (bossHp <= 0 && !bossesDefeated.includes(boss.id)) {
-      bossDefeated = true;
-      bonusXp = getBossBonusXp(boss);
-      bossesDefeated = [...p.bossesDefeated, boss.id];
-      const isLastBoss = bossIndex >= BOSSES.length - 1;
-      currentBossIndex = isLastBoss ? bossIndex : bossIndex + 1;
-      bossHp = isLastBoss ? 0 : BOSSES[currentBossIndex].hp;
-    }
+    if (outcome.bossDefeated) bonusXp = getBossBonusXp(boss);
+    else if (outcome.minionDefeated) bonusXp = getMinionBonusXp(boss.minions[p.stageStep]);
 
     const totalXp = p.totalXp + xpGained + bonusXp;
     const updated: ProfileRecord = {
@@ -97,9 +131,11 @@ export function useProfile() {
       totalXp,
       streak,
       lastWorkoutDate: todayStr(),
-      bossHp: Math.max(bossHp, 0),
-      currentBossIndex,
-      bossesDefeated,
+      currentBossIndex: outcome.next.bossIndex,
+      stageStep: outcome.next.stageStep,
+      enemyHp: Math.max(0, outcome.next.enemyHp),
+      bossesDefeated: outcome.next.bossesDefeated,
+      fight: outcome.next.fight,
     };
     const newAchievements = checkNewAchievements(updated);
     if (newAchievements.length) {
@@ -112,10 +148,25 @@ export function useProfile() {
       xpGained: xpGained + bonusXp,
       leveledUp: afterLevel > beforeLevel,
       newLevel: afterLevel,
-      isCrit,
-      damage,
-      bossDefeated,
+      isCrit: outcome.isCrit,
+      damage: outcome.damage,
+      bossDefeated: outcome.bossDefeated,
+      minionDefeated: outcome.minionDefeated,
+      revived: outcome.revived,
+      bossReached: outcome.bossReached,
+      blocked: outcome.blocked,
+      healed: outcome.healed,
+      enemyName: outcome.enemyName,
       newAchievements,
+      undo: {
+        xp: xpGained + bonusXp,
+        enemyHpBefore: p.enemyHp,
+        bossIndexBefore: p.currentBossIndex,
+        stageStepBefore: p.stageStep,
+        fightBefore: p.fight,
+        bossIdDefeated: outcome.bossDefeated ? boss.id : null,
+        achievementsGranted: newAchievements,
+      },
     };
   }, []);
 
@@ -146,8 +197,44 @@ export function useProfile() {
       isCrit: false,
       damage: 0,
       bossDefeated: false,
+      minionDefeated: false,
+      revived: false,
+      bossReached: false,
+      blocked: null,
+      healed: 0,
+      enemyName: '',
       newAchievements,
+      undo: {
+        xp: xpGained,
+        enemyHpBefore: null,
+        bossIndexBefore: null,
+        stageStepBefore: null,
+        fightBefore: null,
+        bossIdDefeated: null,
+        achievementsGranted: newAchievements,
+      },
     };
+  }, []);
+
+  /**
+   * Lets a regenerating boss heal while you rest, without waiting for your next rep.
+   * Returns how much HP it clawed back, so the UI can show it happening.
+   */
+  const tickArena = useCallback(async (): Promise<number> => {
+    const p = await ensureProfile();
+    const { state, healed } = applyIdleRegen(
+      {
+        bossIndex: Math.min(p.currentBossIndex, BOSSES.length - 1),
+        stageStep: p.stageStep,
+        enemyHp: p.enemyHp,
+        bossesDefeated: p.bossesDefeated,
+        fight: p.fight,
+      },
+      Date.now(),
+    );
+    if (healed <= 0) return 0;
+    await db.profile.put({ ...p, enemyHp: state.enemyHp, fight: state.fight });
+    return healed;
   }, []);
 
   /** Called once when a Speed Rush session ends, to persist personal records. */
@@ -168,31 +255,42 @@ export function useProfile() {
   }, []);
 
   /**
-   * Best-effort undo for the manual "-1" correction button. Reverses XP/pushup count and,
-   * if the boss wasn't defeated on that rep, restores its HP. Boss-defeat transitions are not
-   * reversed (rare edge case) to avoid corrupting the "bosses defeated" history.
+   * Takes one rep back, in either mode. Reverses the pushup count, the XP it granted and any
+   * achievements it unlocked, and — when the rep was the one that finished a boss — puts the boss
+   * back together: previous stage, step inside it, the HP the enemy had before the hit, and
+   * removal from the defeated list. The earlier version bailed out of boss-defeat reps entirely, which made the minus button
+   * silently stop working right after a win.
    */
-  const revertBossRep = useCallback(async (result: RepResult) => {
-    if (result.bossDefeated) return;
+  const revertRep = useCallback(async (undo: RepUndo) => {
     const p = await ensureProfile();
-    const bossIndex = Math.min(p.currentBossIndex, BOSSES.length - 1);
     const updated: ProfileRecord = {
       ...p,
       totalPushups: Math.max(0, p.totalPushups - 1),
-      totalXp: Math.max(0, p.totalXp - result.xpGained),
-      bossHp: Math.min(BOSSES[bossIndex].hp, p.bossHp + result.damage),
+      totalXp: Math.max(0, p.totalXp - undo.xp),
+      achievementsUnlocked: undo.achievementsGranted.length
+        ? p.achievementsUnlocked.filter((id) => !undo.achievementsGranted.includes(id))
+        : p.achievementsUnlocked,
     };
+    if (undo.bossIndexBefore != null && undo.enemyHpBefore != null && undo.stageStepBefore != null) {
+      updated.currentBossIndex = undo.bossIndexBefore;
+      updated.stageStep = undo.stageStepBefore;
+      updated.enemyHp = undo.enemyHpBefore;
+      if (undo.fightBefore) updated.fight = undo.fightBefore;
+      if (undo.bossIdDefeated) {
+        updated.bossesDefeated = p.bossesDefeated.filter((id) => id !== undo.bossIdDefeated);
+      }
+    }
     await db.profile.put(updated);
   }, []);
 
-  const revertRushRep = useCallback(async (result: RepResult) => {
-    const p = await ensureProfile();
-    const updated: ProfileRecord = {
-      ...p,
-      totalPushups: Math.max(0, p.totalPushups - 1),
-      totalXp: Math.max(0, p.totalXp - result.xpGained),
-    };
-    await db.profile.put(updated);
+  /**
+   * Replaces the whole local profile with one pulled from the cloud. Kept separate from the dev
+   * backdoor because this is a real user action, and the id must stay ours no matter what the
+   * cloud copy carried.
+   */
+  const restoreProfile = useCallback(async (incoming: ProfileRecord) => {
+    const safe = migrate({ ...incoming, id: PROFILE_ID });
+    await db.profile.put(safe);
   }, []);
 
   /**
@@ -214,8 +312,9 @@ export function useProfile() {
     registerBossRep,
     registerRushRep,
     finishRush,
-    revertBossRep,
-    revertRushRep,
+    tickArena,
+    revertRep,
+    restoreProfile,
     devPatchProfile,
     devResetProfile,
   };

@@ -10,9 +10,13 @@ import {
   RotateCcw,
   Settings2,
   SwitchCamera,
+  Vibrate,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { usePoseDetection, type ModelQuality } from '../hooks/usePoseDetection';
 import type { Strictness } from '../lib/repDetector';
+import type { Feedback } from '../hooks/useFeedback';
 
 type Mode = 'manual' | 'camera';
 
@@ -57,10 +61,15 @@ function Segmented<T extends string>({
 export function CameraPanel({
   onRep,
   onUndo,
+  canUndo,
+  feedback,
   disabled,
 }: {
   onRep: () => void;
   onUndo: () => void;
+  /** Greys out the minus button when the undo stack is empty, instead of it doing nothing. */
+  canUndo: boolean;
+  feedback: Feedback;
   disabled?: boolean;
 }) {
   const [mode, setMode] = useState<Mode>('manual');
@@ -202,26 +211,54 @@ export function CameraPanel({
                 Повторить попытку
               </button>
             ) : (
-              <>
-                <button
-                  onClick={pose.recalibrate}
-                  disabled={pose.status !== 'tracking'}
-                  className="flex items-center gap-1.5 rounded-lg bg-arena-surface-2 px-3 py-1.5 text-xs font-medium text-arena-text disabled:opacity-40"
-                >
-                  <RotateCcw size={13} /> Перекалибровать
-                </button>
-                <button
-                  onClick={() => setShowSettings((s) => !s)}
-                  className="flex items-center gap-1.5 rounded-lg bg-arena-surface-2 px-3 py-1.5 text-xs font-medium text-arena-text"
-                >
-                  <Settings2 size={13} /> Настройки
-                </button>
-              </>
+              <button
+                onClick={pose.recalibrate}
+                disabled={pose.status !== 'tracking'}
+                className="flex items-center gap-1.5 rounded-lg bg-arena-surface-2 px-3 py-1.5 text-xs font-medium text-arena-text disabled:opacity-40"
+              >
+                <RotateCcw size={13} /> Перекалибровать
+              </button>
             )}
           </div>
+        </div>
+      )}
 
-          {showSettings && (
-            <div className="mt-2 space-y-2 rounded-xl border border-arena-border bg-arena-surface p-3">
+      {/* Settings sit outside the camera block: sound and vibration matter in manual mode too,
+          and hiding them behind the camera toggle made them unreachable there. */}
+      <div className="mb-3 flex justify-center">
+        <button
+          onClick={() => setShowSettings((s) => !s)}
+          className="flex items-center gap-1.5 rounded-lg bg-arena-surface-2 px-3 py-1.5 text-xs font-medium text-arena-text"
+        >
+          <Settings2 size={13} /> Настройки
+        </button>
+      </div>
+
+      {showSettings && (
+        <div className="mb-3 space-y-3 rounded-xl border border-arena-border bg-arena-surface p-3">
+          <div>
+            <p className="mb-1.5 text-[11px] text-arena-text-dim">
+              Отклик на засчитанный повтор — лёжа лицом в пол экрана не видно
+            </p>
+            <div className="space-y-1.5">
+              <Toggle
+                icon={feedback.prefs.sound ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                label="Звук"
+                checked={feedback.prefs.sound}
+                onChange={feedback.setSound}
+              />
+              <Toggle
+                icon={<Vibrate size={14} />}
+                label="Вибрация"
+                checked={feedback.prefs.vibration}
+                onChange={feedback.setVibration}
+                note={feedback.canVibrate ? undefined : 'не поддерживается этим браузером'}
+              />
+            </div>
+          </div>
+
+          {mode === 'camera' && (
+            <>
               <div>
                 <p className="mb-1 text-[11px] text-arena-text-dim">
                   Засчитывать повтор — если считает лишнее, ставь «Строго»
@@ -238,7 +275,7 @@ export function CameraPanel({
                 </p>
                 <Segmented value={pose.model} options={MODEL_LABELS} onChange={pose.setModel} />
               </div>
-            </div>
+            </>
           )}
         </div>
       )}
@@ -246,7 +283,7 @@ export function CameraPanel({
       <div className="flex items-center justify-center gap-4">
         <button
           onClick={onUndo}
-          disabled={disabled}
+          disabled={disabled || !canUndo}
           aria-label="Убрать одно повторение"
           className="flex h-12 w-12 items-center justify-center rounded-full border border-arena-border bg-arena-surface-2 text-arena-text-dim active:scale-95 disabled:opacity-30"
         >
@@ -263,5 +300,47 @@ export function CameraPanel({
         <div className="w-12" />
       </div>
     </div>
+  );
+}
+
+function Toggle({
+  icon,
+  label,
+  checked,
+  onChange,
+  note,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  note?: string;
+}) {
+  return (
+    <button
+      onClick={() => onChange(!checked)}
+      role="switch"
+      aria-checked={checked}
+      className="flex w-full items-center gap-2 rounded-lg bg-arena-surface-2 px-2.5 py-2 text-left"
+    >
+      <span className={clsx('shrink-0', checked ? 'text-arena-amber' : 'text-arena-text-dim')}>{icon}</span>
+      <span className="flex-1 text-xs text-arena-text">
+        {label}
+        {note && <span className="ml-1 text-[10px] text-arena-text-dim">({note})</span>}
+      </span>
+      <span
+        className={clsx(
+          'relative h-5 w-9 shrink-0 rounded-full transition-colors',
+          checked ? 'bg-arena-amber' : 'bg-arena-border',
+        )}
+      >
+        <span
+          className={clsx(
+            'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform',
+            checked ? 'translate-x-4.5' : 'translate-x-0.5',
+          )}
+        />
+      </span>
+    </button>
   );
 }
