@@ -18,6 +18,7 @@ import { hasSeenIntro } from './lib/intro';
 import { useCloud } from './hooks/useCloud';
 import { DevPanel } from './components/DevPanel';
 import { onDevPanelOpen } from './lib/devGate';
+import { isAdmin } from './lib/cloud';
 
 function App() {
   const [view, setView] = useState<ViewId>('home');
@@ -27,7 +28,17 @@ function App() {
   const [introDone, setIntroDone] = useState(hasSeenIntro);
   /** Opened from anywhere through the dev gate (src/lib/devGate.ts), so it lives up here. */
   const [devOpen, setDevOpen] = useState(false);
-  useEffect(() => onDevPanelOpen(() => setDevOpen(true)), []);
+  // In a published build the gesture alone opens nothing: the account must also be an admin,
+  // which the database decides (supabase/admin.sql). Knowing the gesture — it's in the source,
+  // and the source is public — gets nobody in. Locally, in `npm run dev`, it opens for anyone.
+  useEffect(
+    () =>
+      onDevPanelOpen(() => {
+        if (import.meta.env.DEV) return setDevOpen(true);
+        void isAdmin().then((yes) => yes && setDevOpen(true));
+      }),
+    [],
+  );
   const {
     profile,
     derived,

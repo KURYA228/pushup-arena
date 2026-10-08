@@ -420,10 +420,15 @@ export function useProfile() {
     await db.profile.put({ ...p, ...patch, id: PROFILE_ID });
   }, []);
 
-  /** Sets the weekly goal. Changing it mid-week is allowed; the payout still happens once. */
-  const setWeeklyGoal = useCallback(async (goal: number) => {
+  /**
+   * Sets the weekly goal and the daily norm (null puts the day back on automatic). Changing them
+   * mid-week is allowed; the weekly payout still happens once.
+   */
+  const setWeeklyGoal = useCallback(async (goal: number, daily: number | null) => {
     const p = await ensureProfile();
-    await db.profile.put({ ...p, weeklyGoal: goal });
+    const next: ProfileRecord = { ...p, weeklyGoal: goal, dailyGoal: daily ?? undefined };
+    if (daily == null) delete next.dailyGoal;
+    await db.profile.put(next);
   }, []);
 
   const devResetProfile = useCallback(async () => {

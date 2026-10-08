@@ -586,11 +586,13 @@ function PrimaryButton({
       className="arena-glow mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl bg-arena-amber py-3 text-sm font-bold text-black transition-opacity active:scale-[0.98] disabled:opacity-40"
     >
       {busy ? (
+        // Bobs down and up while it waits — a push-up in place of a spinner.
         <motion.span
-          animate={{ opacity: [1, 0.4, 1] }}
-          transition={{ duration: 1.1, repeat: Infinity }}
+          className="inline-block"
+          animate={{ opacity: [1, 0.55, 1], y: [0, 3, 0] }}
+          transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
         >
-          Минуту…
+          Отжимаемся…
         </motion.span>
       ) : (
         children

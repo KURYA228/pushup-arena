@@ -12,6 +12,16 @@ import { setPlusCountsReps, usePlusCountsReps } from '../lib/devFlags';
 import { UPGRADES, upgradeLevel } from '../data/shop';
 import { cloudConfigured, isAdmin } from '../lib/cloud';
 import { AdminPanel } from './AdminPanel';
+import { db } from '../db/db';
+import { useRepLog } from '../hooks/useRepLog';
+import { repsThisWeek, repsToday, weekStart } from '../lib/weekly';
+
+/** Local midnight today. */
+const dayStart = (now: number) => {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
 import { forgetIntro } from '../lib/intro';
 
 /**
@@ -31,6 +41,14 @@ export function DevPanel({
   onClose: () => void;
 }) {
   const plusCounts = usePlusCountsReps();
+  const log = useRepLog();
+  const ringToday = log ? repsToday(log, Date.now()) : 0;
+  const ringWeek = log ? repsThisWeek(log, Date.now()) : 0;
+  /** Drops this period's reps from the log, so the rings start that period empty again. */
+  const clearReps = async (from: number, unpay = false) => {
+    await db.reps.where('at').aboveOrEqual(from).delete();
+    if (unpay) await patch({ weeklyRewardWeek: undefined });
+  };
   const boughtLevels = UPGRADES.reduce((n, u) => n + upgradeLevel(profile.upgrades, u.id), 0);
   /** What every bought level cost, for handing the XP back. */
   const refund = UPGRADES.reduce(
@@ -196,6 +214,48 @@ export function DevPanel({
             </Action>
             <Action onClick={() => void patch({ achievementsUnlocked: [] })}>Закрыть все</Action>
           </Row>
+          {/* Each one on its own: tap to open or take back. */}
+          <div className="flex flex-wrap gap-1">
+            {ACHIEVEMENTS.map((a) => {
+              const on = profile.achievementsUnlocked.includes(a.id);
+              return (
+                <button
+                  key={a.id}
+                  onClick={() =>
+                    void patch({
+                      achievementsUnlocked: on
+                        ? profile.achievementsUnlocked.filter((id) => id !== a.id)
+                        : [...profile.achievementsUnlocked, a.id],
+                    })
+                  }
+                  className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium active:scale-95 ${
+                    on ? 'bg-arena-amber/20 text-arena-amber' : 'bg-arena-surface-2 text-arena-text-dim'
+                  }`}
+                >
+                  {a.emoji} {a.title}
+                </button>
+              );
+            })}
+          </div>
+        </Group>
+
+        <Group title={`Кольца — сегодня ${ringToday}, неделя ${ringWeek}`}>
+          <Row>
+            <Action onClick={() => void clearReps(dayStart(Date.now()))}>Обнулить день</Action>
+            <Action onClick={() => void clearReps(weekStart(Date.now()), true)}>Обнулить неделю</Action>
+          </Row>
+          <Row>
+            <Action
+              onClick={() => void patch({ weeklyGoal: undefined, dailyGoal: undefined, weeklyRewardWeek: undefined })}
+            >
+              Нормы и награду — по умолчанию
+            </Action>
+          </Row>
+          <p className="text-[10px] leading-snug text-arena-text-dim">
+            Обнуление стирает отжимания за день или неделю из журнала — кольца, календарь и «Статы»
+            это увидят; общий счёт и XP не трогает. «Неделя» заодно снимает отметку о выданной
+            награде, чтобы её можно было получить снова.
+          </p>
         </Group>
 
         <Group title={`Магазин — куплено уровней: ${boughtLevels}`}>

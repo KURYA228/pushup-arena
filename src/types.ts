@@ -39,6 +39,8 @@ export interface ProfileRecord {
   rushBestRun?: number[];
   /** Push-ups to reach Monday to Sunday; absent means the default. See src/lib/weekly.ts. */
   weeklyGoal?: number;
+  /** A daily norm set by hand; absent means it's worked out from the weekly goal. */
+  dailyGoal?: number;
   /** Monday (YYYY-MM-DD) of the last week whose goal paid out, so it pays once. */
   weeklyRewardWeek?: string;
   /**

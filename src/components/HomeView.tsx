@@ -36,7 +36,7 @@ export function HomeView({
   derived: Derived;
   buyUpgrade: (id: UpgradeId) => Promise<boolean>;
   buyFreeze: () => Promise<boolean>;
-  setWeeklyGoal: (goal: number) => Promise<void>;
+  setWeeklyGoal: (goal: number, daily: number | null) => Promise<void>;
   onPurchased: () => void;
 }) {
   const upcoming = nextRank(derived.level);

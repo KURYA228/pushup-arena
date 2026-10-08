@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { RepLogEntry } from '../types.ts';
-import { daysLeftInWeek, parseGoal, repsThisWeek, weekKey, weekStart, weeklyBonusXp } from './weekly.ts';
+import { parseDailyGoal, dailyTarget, daysLeftInWeek, parseGoal, repsThisWeek, repsToday, weekKey, weekStart, weeklyBonusXp } from './weekly.ts';
 import { ghostAt, packRun } from './ghost.ts';
 import { heatLevel, heatmapWeeks } from './stats.ts';
 
@@ -71,4 +71,27 @@ test('parseGoal accepts a sane number and refuses the rest', () => {
   assert.equal(parseGoal('9000'), null, 'too big');
   assert.equal(parseGoal('abc'), null);
   assert.equal(parseGoal(''), null);
+});
+
+test('repsToday counts the local calendar day', () => {
+  const entries = [rep(at(2026, 10, 7, 23)), rep(at(2026, 10, 8, 0)), rep(at(2026, 10, 8, 21))];
+  assert.equal(repsToday(entries, at(2026, 10, 8, 22)), 2);
+});
+
+test('dailyTarget spreads what is left over the days that remain', () => {
+  // Monday, nothing done: 150 over 7 days.
+  assert.equal(dailyTarget(150, 0, at(2026, 10, 5)), 22);
+  // Thursday with 60 done: 90 over Thu..Sun = 4 days.
+  assert.equal(dailyTarget(150, 60, at(2026, 10, 8)), 23);
+  // Sunday, 140 done: the last 10 today.
+  assert.equal(dailyTarget(150, 140, at(2026, 10, 11)), 10);
+  // Week already won: back to an even seventh.
+  assert.equal(dailyTarget(150, 200, at(2026, 10, 9)), 22);
+});
+
+test('parseDailyGoal: 1 to 1000, empty is not a number', () => {
+  assert.equal(parseDailyGoal('25'), 25);
+  assert.equal(parseDailyGoal('0'), null);
+  assert.equal(parseDailyGoal('1001'), null);
+  assert.equal(parseDailyGoal(''), null);
 });
