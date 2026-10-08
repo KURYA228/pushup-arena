@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import type { ProfileRecord } from '../types';
 import { BOSSES, BOSS_STEP, encounterAt } from '../data/bosses';
@@ -10,6 +10,8 @@ import { BossIcon } from './BossIcon';
 import { MAX_FREEZES, freezesOf, todayLocal } from '../lib/streak';
 import { setPlusCountsReps, usePlusCountsReps } from '../lib/devFlags';
 import { UPGRADES, upgradeLevel } from '../data/shop';
+import { cloudConfigured, isAdmin } from '../lib/cloud';
+import { AdminPanel } from './AdminPanel';
 import { forgetIntro } from '../lib/intro';
 
 /**
@@ -37,6 +39,17 @@ export function DevPanel({
   );
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  /** The admin section exists only for accounts the database lists as admins. */
+  const [admin, setAdmin] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  useEffect(() => {
+    if (!cloudConfigured()) return;
+    let alive = true;
+    void isAdmin().then((yes) => alive && setAdmin(yes));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -198,6 +211,17 @@ export function DevPanel({
           </p>
         </Group>
 
+        {admin && (
+          <Group title="Админ">
+            <button
+              onClick={() => setAdminOpen(true)}
+              className="w-full rounded-lg border border-arena-red/50 bg-arena-red/10 px-3 py-2 text-xs font-semibold text-arena-red active:scale-95"
+            >
+              Игроки и их прогресс
+            </button>
+          </Group>
+        )}
+
         <Group title="Кнопка «+»">
           <Row>
             <Action onClick={() => setPlusCountsReps(false)}>
@@ -246,6 +270,7 @@ export function DevPanel({
           </button>
         </Group>
       </motion.div>
+      <AnimatePresence>{adminOpen && <AdminPanel onClose={() => setAdminOpen(false)} />}</AnimatePresence>
     </motion.div>
   );
 }

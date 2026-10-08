@@ -36,6 +36,10 @@ export function fingerprint(p: ProfileRecord): string {
     p.bossesDefeated.length,
     p.rushBestReps,
     p.rushBestCombo,
+    // Only present once an admin has edited the save, and appended only then — so every save
+    // that was never touched keeps exactly the fingerprint it had, and no device suddenly
+    // thinks it has diverged from its account.
+    ...(p.adminRev ? [`a${p.adminRev}`] : []),
   ].join('|');
 }
 

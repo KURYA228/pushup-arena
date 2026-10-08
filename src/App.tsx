@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useProfile } from './hooks/useProfile';
 import { useFeedback } from './hooks/useFeedback';
 import { useWakeLock } from './hooks/useWakeLock';
@@ -16,6 +16,8 @@ import { Intro } from './components/Intro';
 import { SyncGate } from './components/SyncGate';
 import { hasSeenIntro } from './lib/intro';
 import { useCloud } from './hooks/useCloud';
+import { DevPanel } from './components/DevPanel';
+import { onDevPanelOpen } from './lib/devGate';
 
 function App() {
   const [view, setView] = useState<ViewId>('home');
@@ -23,6 +25,9 @@ function App() {
   const [entered, setEntered] = useState(false);
   /** The cold open, first launch only. Read once so it can't flicker back mid-session. */
   const [introDone, setIntroDone] = useState(hasSeenIntro);
+  /** Opened from anywhere through the dev gate (src/lib/devGate.ts), so it lives up here. */
+  const [devOpen, setDevOpen] = useState(false);
+  useEffect(() => onDevPanelOpen(() => setDevOpen(true)), []);
   const {
     profile,
     derived,
@@ -33,6 +38,7 @@ function App() {
     tickArena,
     buyUpgrade,
     buyFreeze,
+    setWeeklyGoal,
     restoreProfile,
     devPatchProfile,
     devResetProfile,
@@ -90,10 +96,10 @@ function App() {
               <HomeView
                 profile={profile}
                 derived={derived}
-                devPatchProfile={devPatchProfile}
-                devResetProfile={devResetProfile}
                 buyUpgrade={buyUpgrade}
                 buyFreeze={buyFreeze}
+                setWeeklyGoal={setWeeklyGoal}
+                onPurchased={feedback.purchase}
               />
             )}
             {view === 'boss' && (
@@ -124,6 +130,16 @@ function App() {
         </motion.div>
       </main>
       <NavBar current={view} onChange={setView} />
+      <AnimatePresence>
+        {devOpen && (
+          <DevPanel
+            profile={profile}
+            patch={devPatchProfile}
+            reset={devResetProfile}
+            onClose={() => setDevOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

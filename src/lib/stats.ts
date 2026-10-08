@@ -189,3 +189,46 @@ export function fightDuration(r: Pick<StageRecord, 'firstAt' | 'lastAt' | 'days'
   const min = Math.max(1, Math.round((r.lastAt - r.firstAt) / 60_000));
   return `${min} мин`;
 }
+
+export interface HeatCell {
+  day: string;
+  reps: number;
+  /** After today — drawn empty, not as a day you missed. */
+  future: boolean;
+}
+
+/**
+ * The year-at-a-glance grid: `weeks` columns of seven days, Monday at the top, the last column
+ * holding today. Each cell is a day's reps.
+ */
+export function heatmapWeeks(entries: readonly RepLogEntry[], weeks: number, now: number): HeatCell[][] {
+  const counts = new Map<string, number>();
+  for (const e of entries) {
+    const k = localDay(e.at);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const today = localDay(now);
+  const cursor = new Date(now);
+  cursor.setHours(12, 0, 0, 0);
+  // Back to this week's Monday, then whole weeks before it.
+  cursor.setDate(cursor.getDate() - ((cursor.getDay() + 6) % 7) - (weeks - 1) * 7);
+  const cols: HeatCell[][] = [];
+  let past = true;
+  for (let w = 0; w < weeks; w++) {
+    const col: HeatCell[] = [];
+    for (let d = 0; d < 7; d++) {
+      const k = localDay(cursor.getTime());
+      col.push({ day: k, reps: past ? counts.get(k) ?? 0 : 0, future: !past });
+      if (k === today) past = false;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    cols.push(col);
+  }
+  return cols;
+}
+
+/** Shade 0..4 for a cell: zero is empty, the rest split the busiest day into quarters. */
+export function heatLevel(reps: number, max: number): number {
+  if (reps <= 0 || max <= 0) return 0;
+  return Math.min(4, Math.ceil((reps / max) * 4));
+}

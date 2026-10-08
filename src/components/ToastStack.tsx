@@ -18,26 +18,32 @@ const RING: Record<ToastKind, string> = {
   info: 'border-arena-border',
 };
 
+/**
+ * Compact pills along the top edge. They never take a tap — the whole layer is click-through —
+ * and stay small enough to leave the fight visible under them: a toast confirms a moment, it
+ * shouldn't be the thing you have to look past to keep going.
+ */
 export function ToastStack({ toasts }: { toasts: ToastItem[] }) {
   return (
-    <div className="pointer-events-none fixed top-0 left-0 right-0 z-50 flex flex-col items-center gap-2 px-4 pt-[calc(env(safe-area-inset-top)+12px)]">
-      <AnimatePresence>
+    <div className="pointer-events-none fixed top-0 left-0 right-0 z-50 flex flex-col items-center gap-1.5 px-4 pt-[calc(env(safe-area-inset-top)+8px)]">
+      <AnimatePresence initial={false}>
         {toasts.map((t) => {
           const Icon = ICONS[t.kind];
           return (
             <motion.div
               key={t.id}
-              initial={{ y: -30, opacity: 0, scale: 0.9 }}
+              layout
+              initial={{ y: -20, opacity: 0, scale: 0.9 }}
               animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: -20, opacity: 0, scale: 0.95 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 28 }}
-              className={`pointer-events-auto flex max-w-sm items-center gap-3 rounded-xl border bg-arena-surface/95 px-4 py-3 shadow-xl backdrop-blur ${RING[t.kind]}`}
+              exit={{ y: -12, opacity: 0, scale: 0.95, transition: { duration: 0.18 } }}
+              transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+              className={`flex max-w-[min(22rem,100%)] items-center gap-2 rounded-full border bg-arena-surface/90 py-1.5 pl-2.5 pr-3.5 shadow-lg backdrop-blur ${RING[t.kind]}`}
             >
-              <Icon size={20} className="shrink-0 text-arena-amber" />
-              <div className="min-w-0 text-left">
-                <p className="truncate text-sm font-semibold text-arena-text">{t.title}</p>
-                {t.description && <p className="truncate text-xs text-arena-text-dim">{t.description}</p>}
-              </div>
+              <Icon size={15} className="shrink-0 text-arena-amber" />
+              <p className="min-w-0 truncate text-xs text-arena-text">
+                <span className="font-semibold">{t.title}</span>
+                {t.description && <span className="text-arena-text-dim"> · {t.description}</span>}
+              </p>
             </motion.div>
           );
         })}

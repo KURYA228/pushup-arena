@@ -35,12 +35,23 @@ export interface ProfileRecord {
   achievementsUnlocked: string[];
   rushBestReps: number;
   rushBestCombo: number;
+  /** When each rep of the record Rush landed, ms from the start — the ghost replays it. */
+  rushBestRun?: number[];
+  /** Push-ups to reach Monday to Sunday; absent means the default. See src/lib/weekly.ts. */
+  weeklyGoal?: number;
+  /** Monday (YYYY-MM-DD) of the last week whose goal paid out, so it pays once. */
+  weeklyRewardWeek?: string;
   /**
    * Presses of the «+» button. Kept apart from `totalPushups` on purpose: a tap isn't a counted
    * rep, so it touches nothing in the game — no damage, XP, streak or leaderboard. Absent on
    * older saves.
    */
   clickerTaps?: number;
+  /**
+   * Bumped by the admin panel whenever it edits this save, so the player's phone sees the
+   * change even when only fields outside the sync fingerprint moved. See syncMark.ts.
+   */
+  adminRev?: number;
   /** Levels bought in the shop — see src/data/shop.ts. Absent on older saves. */
   upgrades?: Upgrades;
   createdAt: string;
@@ -77,6 +88,8 @@ export interface RepUndo {
   streakBefore: { streak: number; lastWorkoutDate: string | null; streakFreezes?: number };
   /** Row this rep wrote to the rep log, removed again on undo. */
   logId: number | null;
+  /** The weekly-goal marker from before the rep, in case this rep is the one that paid it. */
+  weeklyRewardWeekBefore?: string;
 }
 
 /**
@@ -123,6 +136,8 @@ export interface RepResult {
   frozeDays: number;
   /** The rep completed a week of streak and earned a freeze. */
   earnedFreeze: boolean;
+  /** XP paid out because this rep reached the weekly goal; 0 otherwise. */
+  weeklyBonus: number;
   undo: RepUndo;
 }
 

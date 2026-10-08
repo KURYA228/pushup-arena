@@ -16,6 +16,8 @@ import { checkNewAchievements } from '../data/achievements';
 import { SEASON, isStale } from '../lib/season';
 import { clearMark } from '../lib/syncMark';
 import { MAX_FREEZES, STARTING_FREEZES, advanceStreak, freezesOf, todayLocal } from '../lib/streak';
+import { packRun } from '../lib/ghost';
+import { DEFAULT_WEEKLY_GOAL, weekKey, weekStart, weeklyBonusXp } from '../lib/weekly';
 import { FREEZE_COST, UPGRADES, nextCost, perksFrom, upgradeLevel, type UpgradeId } from '../data/shop';
 
 function defaultProfile(): ProfileRecord {
@@ -78,10 +80,31 @@ async function ensureProfile(): Promise<ProfileRecord> {
  * Saves the profile and appends the rep to the log in one transaction, so the stats can never
  * disagree with the totals. Returns the log row's id for undo.
  */
-async function commitRep(updated: ProfileRecord, entry: Omit<RepLogEntry, 'id' | 'season'>) {
+async function commitRep(
+  updated: ProfileRecord,
+  entry: Omit<RepLogEntry, 'id' | 'season'>,
+): Promise<{ logId: number; weeklyBonus: number; totalXp: number }> {
   return db.transaction('rw', db.profile, db.reps, async () => {
-    await db.profile.put(updated);
-    return (await db.reps.add({ ...entry, season: SEASON })) as number;
+    const logId = (await db.reps.add({ ...entry, season: SEASON })) as number;
+    // The weekly goal pays once per week, on the rep that reaches it. Counted from the log,
+    // which already holds this rep.
+    let weeklyBonus = 0;
+    let saved = updated;
+    const key = weekKey(entry.at);
+    if (updated.weeklyRewardWeek !== key) {
+      const goal = updated.weeklyGoal ?? DEFAULT_WEEKLY_GOAL;
+      const done = await db.reps
+        .where('at')
+        .between(weekStart(entry.at), entry.at, true, true)
+        .filter((r) => r.season === SEASON)
+        .count();
+      if (done >= goal) {
+        weeklyBonus = weeklyBonusXp(goal);
+        saved = { ...updated, totalXp: updated.totalXp + weeklyBonus, weeklyRewardWeek: key };
+      }
+    }
+    await db.profile.put(saved);
+    return { logId, weeklyBonus, totalXp: saved.totalXp };
   });
 }
 
@@ -167,7 +190,7 @@ export function useProfile() {
     if (newAchievements.length) {
       updated.achievementsUnlocked = [...updated.achievementsUnlocked, ...newAchievements];
     }
-    const logId = await commitRep(updated, {
+    const { logId, weeklyBonus, totalXp: finalXp } = await commitRep(updated, {
       at: Date.now(),
       mode: 'arena',
       bossIndex,
@@ -176,9 +199,9 @@ export function useProfile() {
       crit: outcome.isCrit,
     });
 
-    const afterLevel = levelFromTotalXp(totalXp).level;
+    const afterLevel = levelFromTotalXp(finalXp).level;
     return {
-      xpGained: xpGained + bonusXp,
+      xpGained: xpGained + bonusXp + weeklyBonus,
       leveledUp: afterLevel > beforeLevel,
       newLevel: afterLevel,
       isCrit: outcome.isCrit,
@@ -193,8 +216,10 @@ export function useProfile() {
       newAchievements,
       frozeDays: st.frozeDays,
       earnedFreeze: st.earnedFreeze,
+      weeklyBonus,
       undo: {
-        xp: xpGained + bonusXp,
+        xp: xpGained + bonusXp + weeklyBonus,
+        weeklyRewardWeekBefore: p.weeklyRewardWeek,
         enemyHpBefore: p.enemyHp,
         bossIndexBefore: p.currentBossIndex,
         stageStepBefore: p.stageStep,
@@ -226,7 +251,7 @@ export function useProfile() {
     if (newAchievements.length) {
       updated.achievementsUnlocked = [...updated.achievementsUnlocked, ...newAchievements];
     }
-    const logId = await commitRep(updated, {
+    const { logId, weeklyBonus, totalXp: finalXp } = await commitRep(updated, {
       at: Date.now(),
       mode: 'rush',
       bossIndex: null,
@@ -234,9 +259,9 @@ export function useProfile() {
       damage: 0,
       crit: false,
     });
-    const afterLevel = levelFromTotalXp(totalXp).level;
+    const afterLevel = levelFromTotalXp(finalXp).level;
     return {
-      xpGained,
+      xpGained: xpGained + weeklyBonus,
       leveledUp: afterLevel > beforeLevel,
       newLevel: afterLevel,
       isCrit: false,
@@ -251,8 +276,10 @@ export function useProfile() {
       newAchievements,
       frozeDays: st.frozeDays,
       earnedFreeze: st.earnedFreeze,
+      weeklyBonus,
       undo: {
-        xp: xpGained,
+        xp: xpGained + weeklyBonus,
+        weeklyRewardWeekBefore: p.weeklyRewardWeek,
         enemyHpBefore: null,
         bossIndexBefore: null,
         stageStepBefore: null,
@@ -288,13 +315,15 @@ export function useProfile() {
   }, []);
 
   /** Called once when a Speed Rush session ends, to persist personal records. */
-  const finishRush = useCallback(async (reps: number, bestCombo: number) => {
+  const finishRush = useCallback(async (reps: number, bestCombo: number, run: number[]) => {
     const p = await ensureProfile();
     const isNewRecord = reps > p.rushBestReps;
     const updated: ProfileRecord = {
       ...p,
       rushBestReps: Math.max(p.rushBestReps, reps),
       rushBestCombo: Math.max(p.rushBestCombo, bestCombo),
+      // The record's timeline becomes the next ghost.
+      rushBestRun: isNewRecord ? packRun(run) : p.rushBestRun,
     };
     const newAchievements = checkNewAchievements(updated);
     if (newAchievements.length) {
@@ -320,6 +349,8 @@ export function useProfile() {
       // Undo pops in reverse order, so the snapshot from this rep is exactly the state before it
       // — including a freeze it spent or earned.
       ...undo.streakBefore,
+      // If this rep paid the weekly goal, taking it back un-pays it (its XP is in `undo.xp`).
+      weeklyRewardWeek: undo.weeklyRewardWeekBefore,
       achievementsUnlocked: undo.achievementsGranted.length
         ? p.achievementsUnlocked.filter((id) => !undo.achievementsGranted.includes(id))
         : p.achievementsUnlocked,
@@ -389,6 +420,12 @@ export function useProfile() {
     await db.profile.put({ ...p, ...patch, id: PROFILE_ID });
   }, []);
 
+  /** Sets the weekly goal. Changing it mid-week is allowed; the payout still happens once. */
+  const setWeeklyGoal = useCallback(async (goal: number) => {
+    const p = await ensureProfile();
+    await db.profile.put({ ...p, weeklyGoal: goal });
+  }, []);
+
   const devResetProfile = useCallback(async () => {
     await db.transaction('rw', db.profile, db.reps, async () => {
       await db.profile.put(defaultProfile());
@@ -406,6 +443,7 @@ export function useProfile() {
     revertRep,
     buyUpgrade,
     buyFreeze,
+    setWeeklyGoal,
     restoreProfile,
     devPatchProfile,
     devResetProfile,

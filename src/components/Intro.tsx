@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import clsx from 'clsx';
 import { SkipForward } from 'lucide-react';
 import { markIntroSeen } from '../lib/intro';
@@ -15,8 +15,22 @@ import { markIntroSeen } from '../lib/intro';
 /** The arena stops pulling back at this point and the dark takes over. */
 const PULL_BACK_SEC = 3.2;
 
+/** How long the gates take to open on the way in — light floods out of the button. */
+const ENTER_SEC = 0.55;
+
+/** The breathing glow on the buttons that move you forward. */
+const BUTTON_GLOW = [
+  '0 0 14px rgba(245, 158, 11, 0.45), 0 0 0 rgba(245, 158, 11, 0)',
+  '0 0 26px rgba(245, 158, 11, 0.85), 0 0 60px rgba(245, 158, 11, 0.35)',
+  '0 0 14px rgba(245, 158, 11, 0.45), 0 0 0 rgba(245, 158, 11, 0)',
+];
+const GLOW_PULSE = { duration: 1.8, repeat: Infinity, ease: 'easeInOut' as const };
+
 export function Intro({ onDone }: { onDone: () => void }) {
   const [act, setAct] = useState<'arena' | 'talk'>('arena');
+  const calm = useReducedMotion();
+  /** Where the light pours from: the button that was pressed, in viewport pixels. */
+  const [gate, setGate] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (act !== 'arena') return;
@@ -27,6 +41,17 @@ export function Intro({ onDone }: { onDone: () => void }) {
   const finish = () => {
     markIntroSeen();
     onDone();
+  };
+
+  /**
+   * Into the arena: the light floods out of the button and fills the screen, then the game is
+   * there. On a timer, not on the animation finishing — animations stop while the page is
+   * hidden, and the way in must not depend on one completing.
+   */
+  const enter = (from: { x: number; y: number }) => {
+    if (calm) return finish();
+    setGate(from);
+    window.setTimeout(finish, ENTER_SEC * 1000);
   };
 
   return (
@@ -40,8 +65,27 @@ export function Intro({ onDone }: { onDone: () => void }) {
           previous one's exit animation, and animations stop running while the page is hidden —
           so backgrounding the app mid-intro would leave it stuck on the arena. */}
       <AnimatePresence>
-        {act === 'arena' ? <ArenaShot key="arena" /> : <DialogueScene key="talk" onFinish={finish} />}
+        {act === 'arena' ? <ArenaShot key="arena" /> : <DialogueScene key="talk" onFinish={enter} />}
       </AnimatePresence>
+
+      {gate && (
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute z-10 rounded-full"
+          style={{
+            left: gate.x,
+            top: gate.y,
+            width: 40,
+            height: 40,
+            marginLeft: -20,
+            marginTop: -20,
+            background: 'radial-gradient(circle, #fff7e0 0%, #f5c26b 35%, #f59e0b 60%, #0b0c0f 100%)',
+          }}
+          initial={{ scale: 0, opacity: 1 }}
+          animate={{ scale: 60, opacity: [1, 1, 0.95] }}
+          transition={{ duration: ENTER_SEC, ease: [0.5, 0, 0.75, 0] }}
+        />
+      )}
 
       <button
         onClick={finish}
@@ -83,10 +127,24 @@ function ArenaShot() {
       <motion.p
         className="absolute inset-x-0 bottom-24 text-center text-xs uppercase tracking-[0.4em] text-arena-amber"
         initial={{ opacity: 0 }}
-        animate={{ opacity: [0, 1, 0] }}
-        transition={{ duration: PULL_BACK_SEC, times: [0, 0.45, 0.9] }}
+        animate={{ opacity: [0, 1, 1, 0] }}
+        transition={{ duration: PULL_BACK_SEC, times: [0, 0.2, 0.75, 0.9] }}
+        aria-label="Push Up Legends"
       >
-        Push Up Legends
+        {/* Letter by letter, each rising out of a blur — the name assembling itself. */}
+        {Array.from('Push Up Legends').map((ch, i) => (
+          <motion.span
+            key={i}
+            aria-hidden
+            className="inline-block"
+            style={{ textShadow: '0 0 10px rgba(245, 158, 11, 0.95), 0 0 26px rgba(245, 158, 11, 0.6), 0 0 48px rgba(245, 158, 11, 0.35)' }}
+            initial={{ opacity: 0, y: 10, filter: 'blur(4px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            transition={{ delay: 0.5 + i * 0.045, duration: 0.4, ease: 'easeOut' }}
+          >
+            {ch === ' ' ? '\u00a0' : ch}
+          </motion.span>
+        ))}
       </motion.p>
     </motion.div>
   );
@@ -112,6 +170,15 @@ function Colosseum() {
           <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.5" />
           <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
         </radialGradient>
+        <linearGradient id="beam" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stopColor="#ffe7b0" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="#ffe7b0" stopOpacity="0" />
+        </linearGradient>
+        <radialGradient id="torch">
+          <stop offset="0%" stopColor="#ffd27a" stopOpacity="0.95" />
+          <stop offset="45%" stopColor="#f59e0b" stopOpacity="0.45" />
+          <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
+        </radialGradient>
         <linearGradient id="stone" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#4a3a28" />
           <stop offset="100%" stopColor="#221a12" />
@@ -119,7 +186,15 @@ function Colosseum() {
       </defs>
 
       <rect width="400" height="260" fill="url(#sky)" />
-      <ellipse cx="200" cy="190" rx="190" ry="70" fill="url(#glow)" />
+      <motion.ellipse
+        cx="200"
+        cy="190"
+        rx="190"
+        ry="70"
+        fill="url(#glow)"
+        animate={{ opacity: [0.75, 1, 0.75] }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+      />
 
       {/* Outer wall: an ellipse of arches, squashed into perspective. */}
       <g fill="url(#stone)">
@@ -144,7 +219,77 @@ function Colosseum() {
 
       {/* The sand, lit from inside. */}
       <ellipse cx="200" cy="196" rx="120" ry="30" fill="#d9a441" opacity="0.22" />
-      <ellipse cx="200" cy="196" rx="86" ry="20" fill="#f5c26b" opacity="0.18" />
+      <motion.ellipse
+        cx="200"
+        cy="196"
+        rx="86"
+        ry="20"
+        fill="#f5c26b"
+        animate={{ opacity: [0.14, 0.3, 0.14] }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ filter: 'blur(3px)' }}
+      />
+
+      {/* Searchlights sweeping the sand from either side, slowly, out of step. */}
+      {[
+        { x: 70, from: -18, to: 14, dur: 3.4 },
+        { x: 330, from: 18, to: -14, dur: 3.9 },
+      ].map((b, i) => (
+        <motion.polygon
+          key={`beam-${i}`}
+          points={`${b.x - 3},230 ${b.x + 3},230 ${b.x + 26},70 ${b.x - 26},70`}
+          fill="url(#beam)"
+          style={{ originX: 0.5, originY: 1 }}
+          initial={{ rotate: b.from }}
+          animate={{ rotate: [b.from, b.to, b.from] }}
+          transition={{ duration: b.dur, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      ))}
+
+      {/* Torches along the top tier, each flickering on its own clock. */}
+      {Array.from({ length: 7 }, (_, i) => {
+        const t = (i + 0.5) / 7;
+        const x = 58 + t * 284;
+        const y = 112 - Math.sin(t * Math.PI) * 22;
+        return (
+          <g key={`torch-${i}`}>
+            <motion.circle
+              cx={x}
+              cy={y}
+              r={18}
+              fill="url(#torch)"
+              opacity={0.35}
+              animate={{ opacity: [0.2, 0.45, 0.25, 0.5, 0.2] }}
+              transition={{ duration: 1.3 + (i % 3) * 0.31, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <motion.circle
+              cx={x}
+              cy={y}
+              r={7}
+              fill="url(#torch)"
+              animate={{ opacity: [0.55, 0.95, 0.6, 1, 0.55], scale: [1, 1.15, 0.95, 1.1, 1] }}
+              transition={{ duration: 0.9 + (i % 3) * 0.23, repeat: Infinity, ease: 'easeInOut' }}
+              style={{ originX: 0.5, originY: 0.5 }}
+            />
+            <circle cx={x} cy={y} r={1.4} fill="#ffe7b0" />
+          </g>
+        );
+      })}
+
+      {/* The crowd: camera flashes going off here and there in the stands. */}
+      {Array.from({ length: 10 }, (_, i) => (
+        <motion.circle
+          key={`flash-${i}`}
+          cx={70 + ((i * 61) % 260)}
+          cy={124 + ((i * 23) % 44) - Math.sin((((i * 61) % 260) / 260) * Math.PI) * 18}
+          r={1.6}
+          fill="#ffffff"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0, 0, 1, 0], scale: [0.6, 0.6, 1.8, 0.6] }}
+          transition={{ duration: 1.6 + (i % 4) * 0.5, repeat: Infinity, delay: 0.4 + i * 0.27, times: [0, 0.8, 0.85, 1] }}
+          style={{ originX: 0.5, originY: 0.5, filter: 'drop-shadow(0 0 3px #fff)' }}
+        />
+      ))}
 
       {/* Dust in the light. */}
       {Array.from({ length: 18 }, (_, i) => (
@@ -255,13 +400,54 @@ function lastPose(queue: Line[], at: number): Pose {
 }
 
 /**
+ * A line typed out letter by letter, the way a character speaks in a game. `skip` shows the
+ * rest at once — the first tap on a line finishes it, the second moves on.
+ */
+function Typewriter({ text, skip, onDone }: { text: string; skip: boolean; onDone: () => void }) {
+  const calm = useReducedMotion();
+  const [shown, setShown] = useState(calm ? text.length : 0);
+  const done = skip || shown >= text.length;
+
+  useEffect(() => {
+    if (done) {
+      onDone();
+      return;
+    }
+    // A touch slower on punctuation, so a sentence has its pauses.
+    const prev = text[shown - 1];
+    const wait = prev && /[,.!?—]/.test(prev) ? 140 : 26;
+    const id = window.setTimeout(() => setShown((n) => n + 1), wait);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown, done]);
+
+  const visible = done ? text : text.slice(0, shown);
+  return (
+    // Both copies in one grid cell: the full line, invisible, sets the bubble's final size from
+    // the first letter, and the typed one wraps at exactly the same width over it. An absolute
+    // overlay inside an inline box was sized by the first line fragment — on a line that wraps,
+    // the typed text came out as a narrow column of one word per row.
+    <span className="inline-grid">
+      <span className="invisible col-start-1 row-start-1" aria-hidden>
+        {text}
+      </span>
+      <span className="col-start-1 row-start-1" aria-label={text}>
+        {visible}
+        {!done && <span className="ml-0.5 inline-block w-[2px] animate-pulse bg-current align-middle" style={{ height: '1em' }} />}
+      </span>
+    </span>
+  );
+}
+
+/**
  * The conversation: you on the left, the host on the right, one line at a time.
  *
  * Lines advance on a tap rather than a timer — a countdown either rushes a slow reader or bores
  * a fast one, and there's nothing to hurry towards. The answer you pick is spoken back as your
  * own line, which is what makes it read as a dialogue instead of a menu.
  */
-function DialogueScene({ onFinish }: { onFinish: () => void }) {
+function DialogueScene({ onFinish }: { onFinish: (from: { x: number; y: number }) => void }) {
+  const calm = useReducedMotion();
   const [queue, setQueue] = useState<Line[]>(OPENING);
   const [at, setAt] = useState(0);
   const [branch, setBranch] = useState<'none' | 'accepted' | 'refused'>('none');
@@ -281,21 +467,34 @@ function DialogueScene({ onFinish }: { onFinish: () => void }) {
    * question had finished appearing.
    */
   const [answersReady, setAnswersReady] = useState(false);
+  /** Whether the current line has finished typing, and whether a tap asked it to hurry up. */
+  const [typed, setTyped] = useState(false);
+  const [skipTyping, setSkipTyping] = useState(false);
   useEffect(() => {
-    if (!atChoice && !atEnd) {
+    setTyped(false);
+    setSkipTyping(false);
+  }, [at, branch]);
+  useEffect(() => {
+    if ((!atChoice && !atEnd) || !typed) {
       setAnswersReady(false);
       return;
     }
-    const id = window.setTimeout(() => setAnswersReady(true), 700);
+    // Counted from the last letter now, not from the bubble appearing — the line is read by then.
+    const id = window.setTimeout(() => setAnswersReady(true), 350);
     return () => window.clearTimeout(id);
-  }, [atChoice, atEnd, at, branch]);
+  }, [atChoice, atEnd, at, branch, typed]);
 
   const choosing = atChoice && answersReady;
   const closing = atEnd && answersReady;
 
   const advance = () => {
+    // First tap finishes the line, the next one moves on.
+    if (!typed) return setSkipTyping(true);
     if (!lastOfQueue) setAt((i) => i + 1);
   };
+
+  // "Поздно." — the one line that lands with a thump.
+  const thump = branch === 'refused' && line.who === 'host' && !calm;
 
   const pick = (chosen: 'accepted' | 'refused') => {
     setBranch(chosen);
@@ -325,22 +524,37 @@ function DialogueScene({ onFinish }: { onFinish: () => void }) {
           <motion.div
             key={`${branch}-${at}`}
             initial={{ opacity: 0, y: 10, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ type: 'spring', stiffness: 340, damping: 26 }}
+            animate={thump ? { opacity: 1, y: 0, scale: 1, x: [0, -9, 8, -6, 4, 0] } : { opacity: 1, y: 0, scale: 1 }}
+            transition={
+              thump
+                ? { type: 'spring', stiffness: 340, damping: 26, x: { duration: 0.45, delay: 0.1 } }
+                : { type: 'spring', stiffness: 340, damping: 26 }
+            }
             className={clsx(
               'max-w-[86%] rounded-2xl border px-4 py-3 text-[15px] font-medium leading-snug',
               line.who === 'host'
-                ? 'self-end rounded-br-sm border-arena-amber/40 bg-arena-surface text-arena-text'
+                ? 'self-end rounded-br-sm border-arena-amber/60 bg-arena-surface text-arena-text shadow-[0_0_22px_rgba(245,158,11,0.35)]'
                 : 'self-start rounded-bl-sm border-arena-border bg-arena-surface-2 text-arena-text-dim',
             )}
           >
-            {line.text}
+            <Typewriter text={line.text} skip={skipTyping} onDone={() => setTyped(true)} />
           </motion.div>
         </div>
 
-        <div className="flex items-end justify-between gap-4">
-          <Portrait file="player.jpg" room={PLAYER_W} speaking={line.who === 'player'} side="left" />
-          <Portrait file={POSE_FILE[pose]} room={HOST_W} speaking={line.who === 'host'} side="right" />
+        <div className="relative flex items-end justify-between gap-4">
+          {/* Warm haze behind whoever is speaking, breathing slowly. */}
+          <motion.div
+            aria-hidden
+            className="pointer-events-none absolute bottom-6 h-[70%] w-[65%] rounded-full blur-3xl"
+            style={{ background: 'radial-gradient(circle, rgba(245,158,11,0.45), transparent 70%)' }}
+            animate={{
+              left: line.who === 'host' ? '38%' : '-8%',
+              opacity: calm ? 0.6 : [0.45, 0.8, 0.45],
+            }}
+            transition={{ left: { type: 'spring', stiffness: 120, damping: 20 }, opacity: { duration: 2.6, repeat: Infinity } }}
+          />
+          <Portrait file="player.jpg" room={PLAYER_W} speaking={line.who === 'player'} talking={line.who === 'player' && !typed} side="left" />
+          <Portrait file={POSE_FILE[pose]} room={HOST_W} speaking={line.who === 'host'} talking={line.who === 'host' && !typed} side="right" />
         </div>
 
         <div className="mt-7 min-h-[104px]">
@@ -353,8 +567,8 @@ function DialogueScene({ onFinish }: { onFinish: () => void }) {
                     two read as one block, and you answered before you'd finished reading. */}
                 <motion.button
                   initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+                  animate={{ opacity: 1, y: 0, boxShadow: BUTTON_GLOW }}
+                  transition={{ type: 'spring', stiffness: 320, damping: 26, boxShadow: GLOW_PULSE }}
                   onClick={() => pick('accepted')}
                   className="arena-glow rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98]"
                 >
@@ -374,12 +588,25 @@ function DialogueScene({ onFinish }: { onFinish: () => void }) {
               <motion.button
                 key="closing"
                 initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-                onClick={onFinish}
-                className="arena-glow w-full rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98]"
+                animate={{ opacity: 1, y: 0, boxShadow: BUTTON_GLOW }}
+                transition={{ type: 'spring', stiffness: 320, damping: 26, boxShadow: GLOW_PULSE }}
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  onFinish({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+                }}
+                className="arena-glow relative w-full overflow-hidden rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98]"
               >
-                {branch === 'refused' ? 'Ладно' : 'На арену'}
+                {/* A glint crossing the button now and then — the door is open, go. */}
+                {!calm && (
+                  <motion.span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/50 to-transparent"
+                    initial={{ x: '-120%' }}
+                    animate={{ x: ['-120%', '400%'] }}
+                    transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 1.4, ease: 'easeInOut' }}
+                  />
+                )}
+                <span className="relative">{branch === 'refused' ? 'Ладно' : 'На арену'}</span>
               </motion.button>
             ) : lastOfQueue ? (
               // The pause between the line landing and the answers appearing. Nothing to
@@ -411,11 +638,14 @@ function DialogueScene({ onFinish }: { onFinish: () => void }) {
 function Portrait({
   file,
   speaking,
+  talking = false,
   side,
   room,
 }: {
   file: string;
   speaking: boolean;
+  /** Mid-line: a little bob, the way a talking character moves. */
+  talking?: boolean;
   side: 'left' | 'right';
   /** How wide this portrait may get, in pixels. */
   room: number;
@@ -452,12 +682,16 @@ function Portrait({
       className="flex min-w-0 flex-1 flex-col items-center"
       style={{ maxWidth: room }}
     >
-      <span
+      <motion.span
         className="relative flex items-end justify-center"
+        animate={talking ? { y: [0, -3, 0, -2, 0], rotate: [0, -0.8, 0, 0.6, 0] } : { y: 0, rotate: 0 }}
+        transition={talking ? { duration: 0.7, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
         style={{
           ...box,
           // Mirrored so the two of them face each other rather than both looking the same way.
-          transform: side === 'left' ? 'scaleX(-1)' : undefined,
+          // As framer's own scaleX, not a CSS transform: the talking bob animates the transform,
+          // and a hand-written one would be overwritten and flip him back.
+          scaleX: side === 'left' ? -1 : 1,
         }}
       >
         {missing ? (
@@ -472,7 +706,9 @@ function Portrait({
               height="80%"
               aria-hidden
               style={{
-                filter: speaking ? 'drop-shadow(0 0 28px rgba(245, 158, 11, 0.4))' : 'none',
+                filter: speaking
+                  ? 'drop-shadow(0 0 14px rgba(245, 158, 11, 0.6)) drop-shadow(0 0 40px rgba(245, 158, 11, 0.4))'
+                  : 'none',
               }}
             >
               <circle cx="50" cy="34" r="17" fill="#f59e0b" opacity="0.5" />
@@ -513,12 +749,14 @@ function Portrait({
                   : { maskImage: FIGURE_FADE, WebkitMaskImage: FIGURE_FADE }),
                 // On a cut-out the shadow traces the figure, which is what makes him read as
                 // lit from the scene rather than as a lit rectangle.
-                filter: speaking ? 'drop-shadow(0 0 34px rgba(245, 158, 11, 0.45))' : 'none',
+                filter: speaking
+                  ? 'drop-shadow(0 0 16px rgba(245, 158, 11, 0.65)) drop-shadow(0 0 46px rgba(245, 158, 11, 0.4))'
+                  : 'none',
               }}
             />
           </AnimatePresence>
         )}
-      </span>
+      </motion.span>
       <span className="mt-1 text-[10px] uppercase tracking-widest text-arena-text-dim">
         {side === 'left' ? 'ты' : 'арена'}
       </span>

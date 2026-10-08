@@ -487,3 +487,85 @@ export async function fetchLeaderboard(limit = 50): Promise<LeaderboardRow[]> {
     rushBestReps: r.rush_best_reps as number,
   }));
 }
+
+/* ------------------------------- admin -------------------------------- */
+// Everything below only works for accounts listed in the `admins` table — the database's own
+// rules (supabase/admin.sql) refuse these reads and writes to anybody else, whatever the app
+// shows or hides.
+
+/** Is the signed-in account an admin? False on any doubt. */
+export async function isAdmin(): Promise<boolean> {
+  const db = supabase();
+  if (!db) return false;
+  const { data: auth } = await db.auth.getUser();
+  const id = auth.user?.id;
+  if (!id) return false;
+  const { data, error } = await db.from('admins').select('user_id').eq('user_id', id).maybeSingle();
+  return !error && !!data;
+}
+
+export interface AdminPlayerRow {
+  id: string;
+  displayName: string;
+  totalPushups: number;
+  level: number;
+  streak: number;
+  updatedAt: string;
+}
+
+export async function adminListPlayers(): Promise<AdminPlayerRow[]> {
+  const db = supabase();
+  if (!db) return [];
+  const { data, error } = await db
+    .from('players')
+    .select('id, display_name, total_pushups, level, streak, updated_at')
+    .order('display_name', { ascending: true });
+  if (error) throw new Error(translate(error.message));
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    displayName: r.display_name as string,
+    totalPushups: r.total_pushups as number,
+    level: r.level as number,
+    streak: r.streak as number,
+    updatedAt: r.updated_at as string,
+  }));
+}
+
+/** Someone's full save, or null when they have none yet. */
+export async function adminFetchSave(id: string): Promise<ProfileRecord | null> {
+  const db = supabase();
+  if (!db) return null;
+  const { data, error } = await db.from('saves').select('profile').eq('id', id).maybeSingle();
+  if (error) throw new Error(translate(error.message));
+  return (data?.profile as ProfileRecord | undefined) ?? null;
+}
+
+/**
+ * Writes an edited save back, and the leaderboard row with it so the board shows the change
+ * at once rather than when the player's phone next checks in. The phone adopts the save on its
+ * next sync — see `adminRev` in syncMark.ts for why it notices.
+ */
+export async function adminWriteSave(id: string, profile: ProfileRecord, level: number): Promise<void> {
+  const db = supabase();
+  if (!db) throw new Error('Облако не подключено');
+  const { data, error } = await db
+    .from('saves')
+    .update({ profile: profile as unknown as Record<string, unknown> })
+    .eq('id', id)
+    .select('id');
+  if (error) throw new Error(translate(error.message));
+  // An update the rules refused touches no rows rather than failing — say so plainly.
+  if (!data?.length) throw new Error('Нет прав на запись — проверь, что аккаунт есть в таблице admins');
+  const { error: e2 } = await db
+    .from('players')
+    .update({
+      total_pushups: profile.totalPushups,
+      total_xp: profile.totalXp,
+      level,
+      streak: profile.streak,
+      bosses_defeated: profile.bossesDefeated.length,
+      rush_best_reps: profile.rushBestReps,
+    })
+    .eq('id', id);
+  if (e2) throw new Error(translate(e2.message));
+}

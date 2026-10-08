@@ -15,6 +15,9 @@ import { Heartbeat, PulseTrace } from './Heartbeat';
 import { BOSS_HEARTS, MINION_HEARTS } from '../lib/vitals';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { CameraPanel } from './CameraPanel';
+import { Camera } from 'lucide-react';
+import { HintCard } from './HintCard';
+import { useHint } from '../lib/hints';
 import { streakNotices } from '../lib/streak';
 
 type Derived = NonNullable<ReturnType<typeof useProfile>['derived']>;
@@ -63,6 +66,7 @@ export function BossView({
   /** The dark-and-"BOSS" cut, shown once the third minion falls. */
   const [bossIntro, setBossIntro] = useState(false);
   const enemyControls = useAnimationControls();
+  const [fightHint, dismissFightHint] = useHint('fight');
   const wide = useMediaQuery('(min-width: 768px)');
 
   const [viewport, setViewport] = useState(() =>
@@ -174,6 +178,7 @@ export function BossView({
       }
       if (result.leveledUp) notify('level-up', `Новый уровень: ${result.newLevel}`);
       for (const [title, desc] of streakNotices(result)) notify('info', title, desc);
+      if (result.weeklyBonus > 0) notify('record', 'Цель недели выполнена!', `+${result.weeklyBonus} XP`);
       for (const id of result.newAchievements) {
         const def = ACHIEVEMENTS.find((a) => a.id === id);
         if (def) notify('achievement', `Достижение: ${def.title}`, def.description);
@@ -378,6 +383,25 @@ export function BossView({
       </motion.div>
 
       <CameraPanel onRep={handleRep} onUndo={handleUndo} canUndo={undoDepth > 0} feedback={feedback} />
+
+      {/* Floats over the top of the screen rather than taking a place in the layout: the fight
+          screen is sized to fit a phone exactly, so a card in the flow would either push the
+          counter off the bottom or sit below the fold where a newcomer never scrolls. */}
+      <AnimatePresence>
+        {fightHint && (
+          <div className="safe-top arena-page fixed inset-x-0 top-0 z-30 pt-3">
+            <HintCard icon={<Camera size={16} />} title="Как бить" onClose={dismissFightHint}>
+              <p>
+                Нажми <b className="text-arena-text">«Камера (AI)»</b>, поставь телефон на пол сбоку
+                от себя, чтобы в кадр попадал ты целиком, — и отжимайся. Каждый повтор — удар.
+              </p>
+              <p className="mt-1">
+                «+» — только кликер: считает нажатия, но босса не бьёт.
+              </p>
+            </HintCard>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {bossIntro && (

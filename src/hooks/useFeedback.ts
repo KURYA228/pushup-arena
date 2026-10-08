@@ -6,6 +6,7 @@ import {
   playBossDefeat,
   playBossEncounter,
   playLevelUp,
+  playPurchase,
   playRep,
   playRushEnd,
   saveFeedbackPrefs,
@@ -41,6 +42,7 @@ export function useFeedback() {
       bossEncounter: () => playBossEncounter(prefs),
       levelUp: () => playLevelUp(prefs),
       rushEnd: () => playRushEnd(prefs),
+      purchase: () => playPurchase(prefs),
     }),
     [prefs, update],
   );

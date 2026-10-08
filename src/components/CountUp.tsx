@@ -8,9 +8,11 @@ import { animate } from 'framer-motion';
  * board loading three hundred reps gets a run worth watching. A fixed duration would make either
  * the small change feel laggy or the big one feel like nothing happened.
  */
-export function CountUp({ value }: { value: number }) {
-  const [shown, setShown] = useState(0);
-  const shownRef = useRef(0);
+export function CountUp({ value, fromZero = true }: { value: number; fromZero?: boolean }) {
+  // `fromZero` rolls up from nothing on first show — right for a stat card, wrong for a balance,
+  // where a run from zero reads as the number having been reset.
+  const [shown, setShown] = useState(() => (fromZero ? 0 : value));
+  const shownRef = useRef(shown);
   shownRef.current = shown;
 
   useEffect(() => {

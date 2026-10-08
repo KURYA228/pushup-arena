@@ -6,6 +6,7 @@ import { useRepLog } from '../hooks/useRepLog';
 import { BOSSES } from '../data/bosses';
 import { dailyTotals, fightDuration, plural, stageRecords, summarize, type DayTotal } from '../lib/stats';
 import { BossIcon } from './BossIcon';
+import { Heatmap } from './Heatmap';
 
 const RANGES = [
   { days: 14, label: '2 недели' },
@@ -85,6 +86,11 @@ export function StatsView({ profile }: { profile: ProfileRecord }) {
           </div>
         </div>
         <DayChart days={days} selected={selected} onSelect={setSelected} />
+      </section>
+
+      <section className="mb-4 rounded-2xl border border-arena-border bg-arena-surface p-4">
+        <h2 className="mb-3 text-sm font-semibold text-arena-text">Календарь</h2>
+        <Heatmap entries={log} now={now} />
       </section>
 
       <section>

@@ -465,6 +465,34 @@ export function playLevelUp(prefs: FeedbackPrefs) {
   buzz(prefs, [40, 50, 90]);
 }
 
+/**
+ * A bell: a sine with two quiet upper partials at bell-like ratios and a long, soft tail.
+ * The partials are what make it ring instead of beep — a bare sine is a test tone.
+ */
+function bell(c: AudioContext, freq: number, atSec: number, durSec: number, peak: number) {
+  tone(c, freq, atSec, durSec, peak);
+  tone(c, freq * 2, atSec, durSec * 0.6, peak * 0.28);
+  tone(c, freq * 3.01, atSec, durSec * 0.35, peak * 0.1);
+}
+
+/**
+ * "Paid": the confirmation a purchase makes. In the spirit of a phone's payment chime — a tiny
+ * tick as the button gives, then two bright bells a fourth apart, the second left to ring —
+ * but synthesised here, not a recording of anyone's. Paired with a double tap where vibration
+ * exists, the way a confirmation feels in the hand.
+ */
+export function playPurchase(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      hit(c, 4200, 6, 0, 0.03, 0.12);
+      bell(c, 1318.5, 0.035, 0.28, 0.16); // E6
+      bell(c, 1760, 0.135, 0.7, 0.2); // A6
+    }
+  }
+  buzz(prefs, [18, 60, 28]);
+}
+
 /** Announces that the minions are done and the boss is in front of you. */
 export function playBossEncounter(prefs: FeedbackPrefs) {
   if (prefs.sound) {

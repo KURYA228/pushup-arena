@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion, useAnimationControls, useReducedMotion } from 'framer-motion';
 import { Crosshair, Dumbbell, Hammer, Snowflake, Wind, X } from 'lucide-react';
 import clsx from 'clsx';
 import type { ProfileRecord } from '../types';
@@ -7,6 +7,8 @@ import { levelFromTotalXp } from '../data/leveling';
 import { getRank } from '../data/ranks';
 import { FREEZE_COST, UPGRADES, nextCost, upgradeLevel, type UpgradeId } from '../data/shop';
 import { MAX_FREEZES, freezesOf } from '../lib/streak';
+import { Burst } from './Burst';
+import { CountUp } from './CountUp';
 
 const ICONS: Record<UpgradeId, typeof Dumbbell> = {
   power: Dumbbell,
@@ -25,17 +27,30 @@ export function ShopModal({
   profile,
   buyUpgrade,
   buyFreeze,
+  onPurchased,
   onClose,
 }: {
   profile: ProfileRecord;
   buyUpgrade: (id: UpgradeId) => Promise<boolean>;
   buyFreeze: () => Promise<boolean>;
+  /** Plays the payment chime. */
+  onPurchased: () => void;
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
   /** The item waiting for a second tap because buying it costs a level. */
   const [confirming, setConfirming] = useState<ItemId | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  /** The last purchase, keyed by time so buying the same thing twice celebrates twice. */
+  const [bought, setBought] = useState<{ id: ItemId; at: number } | null>(null);
+  /** Set when a purchase cost a level — the level line flashes red. */
+  const [droppedAt, setDroppedAt] = useState<number | null>(null);
+  /**
+   * The flinch is driven by controls, not by re-keying the block: a new key remounts the
+   * counter inside it, which then rolled up from zero as if the balance had been reset.
+   */
+  const balance = useAnimationControls();
+  const calm = useReducedMotion();
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -57,6 +72,14 @@ export function ShopModal({
     }
     setConfirming(null);
     const ok = id === 'freeze' ? await buyFreeze() : await buyUpgrade(id);
+    if (ok) {
+      onPurchased();
+      setBought({ id, at: Date.now() });
+      if (after < level) {
+        setDroppedAt(Date.now());
+        if (!calm) void balance.start({ x: [0, -8, 7, -5, 3, 0], transition: { duration: 0.45 } });
+      }
+    }
     setMessage(
       ok
         ? after < level
@@ -125,28 +148,78 @@ export function ShopModal({
         </button>
 
         <p className="text-center text-[11px] uppercase tracking-widest text-arena-text-dim">Магазин</p>
-        <p className="mt-1 text-center text-2xl font-bold tabular-nums text-arena-text">{xp} XP</p>
-        <p className="text-center text-xs text-arena-text-dim">
-          уровень {level} · {getRank(level).name}
-        </p>
+        <motion.div animate={balance} className="text-center">
+          <p className="mt-1 text-2xl font-bold tabular-nums text-arena-text">
+            {/* Starts on the real balance and only rolls on a purchase. */}
+            <CountUp value={xp} fromZero={false} /> XP
+          </p>
+          <motion.p
+            key={level}
+            initial={droppedAt ? { color: '#ef4444', scale: 1.15 } : false}
+            animate={{ color: 'var(--color-arena-text-dim)', scale: 1 }}
+            transition={{ duration: 0.9 }}
+            className="text-xs"
+          >
+            уровень {level} · {getRank(level).name}
+          </motion.p>
+        </motion.div>
         <p className="mx-auto mt-2 max-w-[18rem] text-center text-[11px] leading-snug text-arena-text-dim">
           Покупки оплачиваются из XP уровня — уровень и ранг могут упасть, в таблице лидеров тоже.
         </p>
 
         <ul className="mt-4 space-y-2">
-          {items.map((it) => {
+          {items.map((it, index) => {
             const Icon = it.icon;
             const maxed = it.cost == null;
             const affordable = !maxed && xp >= it.cost!;
             const after = maxed ? level : levelFromTotalXp(Math.max(0, xp - it.cost!)).level;
             const drops = affordable && after < level;
             const isConfirming = confirming === it.id;
+            const justBought = bought?.id === it.id;
             return (
-              <li key={it.id} className="rounded-2xl border border-arena-border bg-arena-surface-2 p-3">
+              <motion.li
+                key={it.id}
+                // Dealt onto the table one after another.
+                initial={calm ? false : { opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 + index * 0.06, type: 'spring', stiffness: 320, damping: 26 }}
+                className="relative rounded-2xl border border-arena-border bg-arena-surface-2 p-3"
+              >
+                {/* A warm flash over the card that was just bought. */}
+                {justBought && !calm && (
+                  <motion.span
+                    key={bought.at}
+                    aria-hidden
+                    initial={{ opacity: 0.55 }}
+                    animate={{ opacity: 0 }}
+                    transition={{ duration: 0.8 }}
+                    className="pointer-events-none absolute inset-0 rounded-2xl"
+                    style={{ background: 'radial-gradient(circle at 20% 30%, rgba(245,158,11,0.55), transparent 70%)' }}
+                  />
+                )}
                 <div className="flex items-start gap-3">
-                  <span className="mt-0.5 rounded-xl bg-arena-surface p-2 text-arena-amber">
+                  <motion.span
+                    key={justBought ? bought.at : 'icon'}
+                    initial={justBought && !calm ? { rotate: -25, scale: 1.4 } : false}
+                    animate={{ rotate: 0, scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 10 }}
+                    className="relative mt-0.5 rounded-xl bg-arena-surface p-2 text-arena-amber"
+                  >
                     <Icon size={18} />
-                  </span>
+                    <AnimatePresence>
+                      {justBought && (
+                        <motion.span
+                          key={bought.at}
+                          initial={{ opacity: 0, y: 0 }}
+                          animate={{ opacity: [0, 1, 0], y: -28 }}
+                          transition={{ duration: 1.1, ease: 'easeOut' }}
+                          className="pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap text-[11px] font-extrabold text-arena-amber"
+                        >
+                          +1 ур.
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </motion.span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
                       <p className="text-sm font-semibold text-arena-text">{it.name}</p>
@@ -158,36 +231,48 @@ export function ShopModal({
                     {/* Pips for the levels, so progress reads at a glance. */}
                     <div className="mt-1.5 flex gap-1">
                       {Array.from({ length: it.max }, (_, i) => (
-                        <span
-                          key={i}
-                          className={clsx('h-1 flex-1 rounded-full', i < it.have ? 'bg-arena-amber' : 'bg-arena-border')}
-                        />
+                        <span key={i} className="relative h-1 flex-1 overflow-hidden rounded-full bg-arena-border">
+                          {i < it.have && (
+                            // The newest pip fills from the left with a spring; the rest just sit.
+                            <motion.span
+                              initial={justBought && i === it.have - 1 && !calm ? { scaleX: 0 } : false}
+                              animate={{ scaleX: 1 }}
+                              transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
+                              className="absolute inset-0 origin-left rounded-full bg-arena-amber"
+                            />
+                          )}
+                        </span>
                       ))}
                     </div>
                   </div>
                 </div>
 
-                <button
+                <motion.button
                   onClick={() => void buy(it.id, it.cost!, it.name)}
                   disabled={!affordable}
+                  whileTap={{ scale: 0.96 }}
+                  // The confirm state wobbles, so a second tap is clearly being asked for.
+                  animate={isConfirming && !calm ? { x: [0, -4, 4, -3, 3, 0] } : { x: 0 }}
+                  transition={{ duration: 0.4 }}
                   className={clsx(
-                    'mt-2.5 w-full rounded-xl py-2 text-sm font-semibold tabular-nums active:scale-[0.98] disabled:opacity-40',
+                    'relative mt-2.5 w-full rounded-xl py-2 text-sm font-semibold tabular-nums disabled:opacity-40',
                     isConfirming ? 'bg-arena-red text-white' : 'bg-arena-amber text-arena-bg',
                   )}
                 >
+                  {justBought && <Burst key={bought.at} count={16} spread={90} />}
                   {maxed
                     ? 'Максимум'
                     : isConfirming
                       ? `Точно? Уровень ${level} → ${after}`
                       : `Купить за ${it.cost} XP`}
-                </button>
+                </motion.button>
                 {!maxed && !affordable && (
                   <p className="mt-1 text-center text-[10px] text-arena-text-dim">не хватает {it.cost! - xp} XP</p>
                 )}
                 {drops && !isConfirming && (
                   <p className="mt-1 text-center text-[10px] text-arena-red">уровень упадёт до {after}</p>
                 )}
-              </li>
+              </motion.li>
             );
           })}
         </ul>

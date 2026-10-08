@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronRight, Flame, MessageSquare, MousePointerClick, ShoppingBag, Snowflake, Trophy } from 'lucide-react';
+import { BookOpen, ChevronRight, CircleHelp, Flame, MessageSquare, MousePointerClick, ShoppingBag, Snowflake, Trophy } from 'lucide-react';
 import type { ProfileRecord } from '../types';
 import type { useProfile } from '../hooks/useProfile';
 import { ACHIEVEMENTS } from '../data/achievements';
@@ -9,34 +9,35 @@ import { AchievementGrid } from './AchievementGrid';
 import { BossIcon } from './BossIcon';
 import { BossGallery } from './BossGallery';
 import { BossProfileModal } from './BossProfileModal';
-import { DevPanel } from './DevPanel';
 import { ShopModal } from './ShopModal';
+import { WeeklyGoal } from './WeeklyGoal';
 import { FEEDBACK_FORM_URL } from '../lib/feedbackForm';
 import type { UpgradeId } from '../data/shop';
 import { CountUp } from './CountUp';
 import { nextRank } from '../data/ranks';
+import { HelpModal } from './HelpModal';
+import { HintCard } from './HintCard';
+import { InstallHint } from './InstallHint';
+import { useHint } from '../lib/hints';
+import { armDevGate, openDevPanel, tapCounter } from '../lib/devGate';
 import { MAX_FREEZES, streakView, todayLocal } from '../lib/streak';
 
 type Derived = NonNullable<ReturnType<typeof useProfile>['derived']>;
 
-/** Taps on the title needed to reveal the dev panel, and how long the streak of taps stays alive. */
-const DEV_TAPS = 5;
-const DEV_TAP_WINDOW_MS = 1500;
-
 export function HomeView({
   profile,
   derived,
-  devPatchProfile,
-  devResetProfile,
   buyUpgrade,
   buyFreeze,
+  setWeeklyGoal,
+  onPurchased,
 }: {
   profile: ProfileRecord;
   derived: Derived;
   buyUpgrade: (id: UpgradeId) => Promise<boolean>;
   buyFreeze: () => Promise<boolean>;
-  devPatchProfile: (p: Partial<ProfileRecord>) => Promise<void>;
-  devResetProfile: () => Promise<void>;
+  setWeeklyGoal: (goal: number) => Promise<void>;
+  onPurchased: () => void;
 }) {
   const upcoming = nextRank(derived.level);
   // The stored streak goes stale while you're away; this is what it actually is today.
@@ -44,25 +45,25 @@ export function HomeView({
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const openBoss = openIndex == null ? null : BOSSES[openIndex];
 
-  const [devOpen, setDevOpen] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
-  const tapsRef = useRef({ count: 0, at: 0 });
-  const onTitleTap = () => {
-    const now = Date.now();
-    const t = tapsRef.current;
-    t.count = now - t.at > DEV_TAP_WINDOW_MS ? 1 : t.count + 1;
-    t.at = now;
-    if (t.count >= DEV_TAPS) {
-      t.count = 0;
-      setDevOpen(true);
-    }
-  };
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [howtoVisible, dismissHowto] = useHint('howto');
+  // Step one of the two-step way into the dev panel (see devGate.ts). Silent on purpose.
+  const onTitleTap = useMemo(() => tapCounter(armDevGate), []);
 
   return (
     <div className="arena-page pb-8 pt-6">
-      <header className="mb-6 text-center">
-        {/* Five quick taps open the dev panel — hidden rather than absent, so it also works on
-            the phone against a production build. */}
+      <header className="relative mb-6 text-center">
+        {/* Always within reach, not just while the newcomer card is up. */}
+        <button
+          onClick={() => setHelpOpen(true)}
+          aria-label="Как играть"
+          className="absolute right-0 top-0 rounded-full bg-arena-surface p-2 text-arena-text-dim active:scale-95"
+        >
+          <CircleHelp size={18} />
+        </button>
+        {/* Five quick taps here are step one of two into the dev panel (src/lib/devGate.ts);
+            step two is under "Начать Rush". Works against a production build on the phone. */}
         <button
           onClick={onTitleTap}
           className="text-xs uppercase tracking-widest text-arena-text-dim"
@@ -77,13 +78,34 @@ export function HomeView({
         )}
         {import.meta.env.DEV && (
           <button
-            onClick={() => setDevOpen(true)}
+            onClick={openDevPanel}
             className="mt-2 rounded-full border border-arena-amber/40 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-arena-amber"
           >
             dev
           </button>
         )}
       </header>
+
+      <AnimatePresence initial={false}>
+        <InstallHint key="install" />
+        {howtoVisible && (
+          <HintCard key="howto" icon={<BookOpen size={16} />} title="Впервые здесь?" onClose={dismissHowto}>
+            <p>
+              Отжимания считает камера, каждое — удар по боссу. За них XP, уровни и улучшения в
+              магазине.
+            </p>
+            <button
+              onClick={() => {
+                setHelpOpen(true);
+                dismissHowto();
+              }}
+              className="mt-2.5 w-full rounded-xl bg-arena-amber py-2 text-sm font-semibold text-arena-bg active:scale-[0.98]"
+            >
+              Как играть — за минуту
+            </button>
+          </HintCard>
+        )}
+      </AnimatePresence>
 
       {/* Two columns once there's room: your own numbers on the left, the roster on the right.
           One stretched column on a laptop wastes most of the window and makes every card a
@@ -128,6 +150,8 @@ export function HomeView({
           <ShoppingBag size={14} /> Магазин — потратить XP на улучшения
         </button>
       </section>
+
+      <WeeklyGoal profile={profile} setWeeklyGoal={setWeeklyGoal} />
 
       <section className="mb-4 grid grid-cols-3 gap-3">
         <motion.div
@@ -313,24 +337,16 @@ export function HomeView({
         )}
       </AnimatePresence>
 
+      <AnimatePresence>{helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}</AnimatePresence>
+
       <AnimatePresence>
         {shopOpen && (
           <ShopModal
             profile={profile}
             buyUpgrade={buyUpgrade}
             buyFreeze={buyFreeze}
+            onPurchased={onPurchased}
             onClose={() => setShopOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {devOpen && (
-          <DevPanel
-            profile={profile}
-            patch={devPatchProfile}
-            reset={devResetProfile}
-            onClose={() => setDevOpen(false)}
           />
         )}
       </AnimatePresence>
