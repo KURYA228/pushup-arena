@@ -19,7 +19,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons/*.png'],
       manifest: {
-        name: 'Железная Арена',
+        name: 'Push Up Legends',
         short_name: 'Арена',
         description: 'Геймифицированный счётчик отжиманий с боссами, XP и AI-подсчётом через камеру',
         theme_color: '#0b0c0f',
@@ -39,6 +39,10 @@ export default defineConfig({
         // are fetched from CDN at runtime (see README) and are not part of this precache.
         globPatterns: ['**/*.{js,css,html,svg,png,jpg,ico}'],
         navigateFallback: `${base}index.html`,
+        // Runs inside the worker and reloads open windows once a new version activates. The
+        // page-side handler in main.tsx can only rescue pages that already run a build
+        // containing it; this one also rescues a page still on the previous bundle.
+        importScripts: ['sw-refresh.js'],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.origin === 'https://storage.googleapis.com' || url.origin === 'https://cdn.jsdelivr.net',

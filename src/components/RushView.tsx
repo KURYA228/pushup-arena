@@ -4,6 +4,7 @@ import { Timer, Trophy, Zap } from 'lucide-react';
 import type { ProfileRecord, RepResult, RepUndo, ToastKind } from '../types';
 import type { Feedback } from '../hooks/useFeedback';
 import { ACHIEVEMENTS } from '../data/achievements';
+import { streakNotices } from '../lib/streak';
 import { CameraPanel } from './CameraPanel';
 
 const DURATION_S = 60;
@@ -112,6 +113,7 @@ export function RushView({
       if (result.leveledUp) feedback.levelUp();
       else feedback.rep();
       if (result.leveledUp) notify('level-up', `Новый уровень: ${result.newLevel}`);
+      for (const [title, desc] of streakNotices(result)) notify('info', title, desc);
       for (const id of result.newAchievements) {
         const def = ACHIEVEMENTS.find((a) => a.id === id);
         if (def) notify('achievement', `Достижение: ${def.title}`, def.description);
@@ -138,7 +140,7 @@ export function RushView({
   };
 
   return (
-    <div className="mx-auto max-w-md px-4 pb-8 pt-6 text-center">
+    <div className="arena-page pb-8 pt-6 text-center">
       <h1 className="mb-1 text-xl font-bold text-arena-text">Speed Rush</h1>
       <p className="mb-4 text-xs text-arena-text-dim">60 секунд, максимум повторов, комбо за темп</p>
 

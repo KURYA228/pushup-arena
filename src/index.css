@@ -54,3 +54,30 @@ body {
 .arena-glow {
   box-shadow: 0 0 24px -6px rgba(245, 158, 11, 0.35);
 }
+
+/*
+ * The page column. Phone-first — a single narrow column is right on the device the app is
+ * actually used on — but on a laptop that column stranded most of the window, so it widens in
+ * two steps. Views that gain from the extra room rearrange themselves at the same breakpoints;
+ * the sign-in form deliberately doesn't use this, because a login field a thousand pixels wide
+ * is worse than a narrow one.
+ */
+.arena-page {
+  width: 100%;
+  margin-inline: auto;
+  max-width: 28rem;
+  padding-inline: 1rem;
+}
+
+@media (min-width: 768px) {
+  .arena-page {
+    max-width: 46rem;
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .arena-page {
+    max-width: 68rem;
+  }
+}

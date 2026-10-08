@@ -1,4 +1,5 @@
 import type { FightState } from './data/combat';
+import type { Upgrades } from './data/shop';
 
 // Central persisted profile shape stored in IndexedDB (see src/db/db.ts).
 export interface ProfileRecord {
@@ -7,8 +8,13 @@ export interface ProfileRecord {
   /** Lifetime cumulative XP. Level/rank are always derived from this — single source of truth. */
   totalXp: number;
   streak: number;
-  /** ISO date (YYYY-MM-DD) of the last day the user logged at least one rep. */
+  /**
+   * Calendar day (YYYY-MM-DD) of the last rep, in the device's timezone. Saves from before
+   * freezes existed wrote it in UTC; the one-day skew that leaves is what a freeze absorbs.
+   */
   lastWorkoutDate: string | null;
+  /** Streak freezes in stock — see src/lib/streak.ts. Absent on older saves. */
+  streakFreezes?: number;
   /** Which stage of the arena you're on — index into BOSSES. */
   currentBossIndex: number;
   /** Position inside the stage: 0..2 are the minions, 3 is the boss itself. */
@@ -29,7 +35,20 @@ export interface ProfileRecord {
   achievementsUnlocked: string[];
   rushBestReps: number;
   rushBestCombo: number;
+  /**
+   * Presses of the «+» button. Kept apart from `totalPushups` on purpose: a tap isn't a counted
+   * rep, so it touches nothing in the game — no damage, XP, streak or leaderboard. Absent on
+   * older saves.
+   */
+  clickerTaps?: number;
+  /** Levels bought in the shop — see src/data/shop.ts. Absent on older saves. */
+  upgrades?: Upgrades;
   createdAt: string;
+  /**
+   * Which run of the game this progress belongs to — see src/lib/season.ts. Absent on saves
+   * written before seasons existed, which count as season 0.
+   */
+  season?: number;
 }
 
 /**
@@ -54,6 +73,29 @@ export interface RepUndo {
   /** Set when this rep finished a boss off, so the win can be rolled back too. */
   bossIdDefeated: string | null;
   achievementsGranted: string[];
+  /** Streak fields from before the rep — it may have spent or earned a freeze. */
+  streakBefore: { streak: number; lastWorkoutDate: string | null; streakFreezes?: number };
+  /** Row this rep wrote to the rep log, removed again on undo. */
+  logId: number | null;
+}
+
+/**
+ * One counted rep, as remembered by the rep log (src/db/db.ts). Local only — the cloud mirrors
+ * the profile, not the history, so a restored profile starts its log from scratch.
+ */
+export interface RepLogEntry {
+  id?: number;
+  /** Epoch milliseconds. */
+  at: number;
+  mode: 'arena' | 'rush';
+  /** Stage the rep was fought on; null for Speed Rush. */
+  bossIndex: number | null;
+  /** Position in the stage, 0..2 minions and 3 the boss; null for Speed Rush. */
+  stageStep: number | null;
+  damage: number;
+  crit: boolean;
+  /** Season the rep belongs to — a reset leaves older rows behind, and they're ignored. */
+  season: number;
 }
 
 /** Result of registering a single rep, used to drive UI feedback (damage numbers, toasts, undo). */
@@ -77,6 +119,10 @@ export interface RepResult {
   /** Who the rep was aimed at, for damage popups and toasts. */
   enemyName: string;
   newAchievements: string[];
+  /** Missed days a streak freeze just covered. */
+  frozeDays: number;
+  /** The rep completed a week of streak and earned a freeze. */
+  earnedFreeze: boolean;
   undo: RepUndo;
 }
 

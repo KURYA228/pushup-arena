@@ -5,6 +5,7 @@ import type { BossDef, BossStatus } from '../data/bosses';
 import { BOSSES } from '../data/bosses';
 import { abilityName, describeAbility } from '../data/abilities';
 import { BossIcon } from './BossIcon';
+import { VictoryCard } from './VictoryCard';
 
 /** Full-height card for a single boss: the figure at a size worth looking at, plus its line. */
 export function BossProfileModal({
@@ -12,6 +13,8 @@ export function BossProfileModal({
   index,
   hpLeft,
   status,
+  level,
+  rankName,
   onClose,
 }: {
   boss: BossDef;
@@ -19,6 +22,9 @@ export function BossProfileModal({
   /** Remaining HP — only meaningful for the boss you're currently fighting. */
   hpLeft: number;
   status: BossStatus;
+  /** For the victory card on a beaten boss. */
+  level: number;
+  rankName: string;
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
@@ -67,15 +73,25 @@ export function BossProfileModal({
           Босс {index + 1} из {BOSSES.length}
         </p>
 
-        <div
-          className="mx-auto mt-3 flex w-full justify-center rounded-2xl py-4"
-          style={{ background: `radial-gradient(circle at 50% 55%, ${boss.color}26, transparent 70%)` }}
-        >
-          <BossIcon boss={boss} index={index} size={150} />
-        </div>
+        {/* A beaten boss opens on his victory card — it already carries the portrait, the
+            name and the title, so it takes their place instead of repeating them. */}
+        {status === 'defeated' ? (
+          <div className="mt-3">
+            <VictoryCard bossIndex={index} level={level} rankName={rankName} />
+          </div>
+        ) : (
+          <>
+            <div
+              className="mx-auto mt-3 flex w-full justify-center rounded-2xl py-4"
+              style={{ background: `radial-gradient(circle at 50% 55%, ${boss.color}26, transparent 70%)` }}
+            >
+              <BossIcon boss={boss} index={index} size={150} />
+            </div>
 
-        <h2 className="mt-2 text-xl font-bold text-arena-text">{boss.name}</h2>
-        <p className="text-xs text-arena-text-dim">{boss.title}</p>
+            <h2 className="mt-2 text-xl font-bold text-arena-text">{boss.name}</h2>
+            <p className="text-xs text-arena-text-dim">{boss.title}</p>
+          </>
+        )}
 
         <blockquote
           className="mt-4 rounded-2xl border-l-2 bg-arena-surface-2 px-4 py-3 text-left text-sm italic leading-snug text-arena-text"

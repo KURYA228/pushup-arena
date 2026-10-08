@@ -192,6 +192,37 @@ test('losing tracking mid-rep does not fabricate one on return', () => {
   assert.equal(d.snapshot().reps, counted);
 });
 
+/**
+ * The camera loses the arm at the bottom of a deep rep: the body is closest to the floor,
+ * the elbow folds over the wrist and the shoulder hides it. This is the reported failure —
+ * the depth bar runs all the way to the top and the rep is not counted.
+ */
+function countWithDropout(hideFrom: number, reps = 8, periodMs = 2000): number {
+  const d = new RepDetector();
+  const rand = noiseSource();
+  let counted = 0;
+  let t = 0;
+  while (t < reps * periodMs) {
+    const p = (t % periodMs) / periodMs;
+    const depth = 0.5 - 0.5 * Math.cos(2 * Math.PI * p);
+    const angle = 155 - 55 * depth + rand() * 2;
+    if (depth >= hideFrom) d.markPoseLost();
+    else if (d.push(sampleFor(angle, depth, t, 'pushup', rand()), t)) counted += 1;
+    t += DT;
+  }
+  return counted;
+}
+
+test('a rep still counts when the arm disappears at the bottom', () => {
+  // Короткая потеря у самого низа. Half a second blind, which is what a deep rep costs.
+  assert.ok(countWithDropout(0.85) >= 7, `с коротким пропаданием: ${countWithDropout(0.85)}`);
+});
+
+test('a rep still counts when the arm is hidden for most of the bottom', () => {
+  // Three quarters of a second — the arm is out of sight through the whole bottom of the rep.
+  assert.ok(countWithDropout(0.7) >= 7, `с длинным пропаданием: ${countWithDropout(0.7)}`);
+});
+
 test('learns the personal range and reports it', () => {
   const d = new RepDetector();
   simulate(d, { bottom: 100, top: 150, reps: 6 });

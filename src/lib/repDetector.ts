@@ -78,7 +78,16 @@ export interface DetectorTuning {
   minRepIntervalMs: number;
   /** How much history feeds the personal-range estimate. */
   romWindowMs: number;
-  /** A gap this long means we lost you — restart the cycle rather than fake a rep across it. */
+  /**
+   * A gap this long means we lost you — restart the cycle rather than fake a rep across it.
+   *
+   * It has to be longer than any dropout that happens *inside* a rep. The bottom of a deep
+   * push-up is exactly where the camera loses the arm: the chest is near the floor, the
+   * forearm folds under the shoulder and the elbow goes out of sight for the best part of a
+   * second. At 700ms that reset landed in the middle of every deep rep, threw the descent
+   * away and counted nothing at all — while the depth bar, which is drawn from the last
+   * smoothed angle and not from the state machine, had cheerfully run to the top.
+   */
   poseGapResetMs: number;
   /** Deliberately forgiving thresholds used only until the personal range is learned. */
   fallbackDown: number;
@@ -87,6 +96,13 @@ export interface DetectorTuning {
   emaAlpha: number;
   /** Valid samples required before the state machine arms, so a garbage first frame can't fake a rep. */
   warmupSamples: number;
+  /**
+   * Samples required again after the pose flickers out. Smaller than the first warm-up: the
+   * filters only need a couple of frames to be meaningful again, and re-serving the full
+   * warm-up on every flicker blinds the counter for a sixth of a second each time — which,
+   * near the bottom of a rep where the tracking is worst, is the whole descent.
+   */
+  reWarmupSamples: number;
   /** How much recent motion the body-engagement test looks at. */
   motionWindowMs: number;
   /** Shoulder travel, in body lengths, required within that window. */
@@ -109,11 +125,12 @@ export const DEFAULT_TUNING: DetectorTuning = {
   minDownMs: 140,
   minRepIntervalMs: 500,
   romWindowMs: 12_000,
-  poseGapResetMs: 700,
+  poseGapResetMs: 1800,
   fallbackDown: 110,
   fallbackUp: 145,
   emaAlpha: 0.45,
   warmupSamples: 5,
+  reWarmupSamples: 2,
   motionWindowMs: 1200,
   minBodyTravel: 0.2,
   bodyOverArmRatio: 1.15,
@@ -288,7 +305,8 @@ export class RepDetector {
     this.medianBuf = [];
     this.smoothed = null;
     this.motion = [];
-    this.warmup = 0;
+    // Not all the way to zero: see `reWarmupSamples`.
+    this.warmup = Math.min(this.warmup, this.tuning.warmupSamples - this.tuning.reWarmupSamples);
   }
 
   snapshot(): DetectorSnapshot {

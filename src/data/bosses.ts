@@ -15,6 +15,9 @@ export interface MinionDef {
   icon: string;
 }
 
+/** Named rep cues a stage can ask for instead of the default. */
+export type HitSound = 'coins' | 'oink';
+
 export interface BossDef {
   /**
    * Stable key. Deliberately unrelated to `name` by now: the profile stores defeated bosses by
@@ -42,6 +45,16 @@ export interface BossDef {
    * domain root, which is exactly how GitHub Pages serves it.
    */
   icon: string;
+  /**
+   * Overrides the sound a counted rep makes against **this boss himself**. Left out — and for
+   * every minion on his stage, always — the ordinary beep plays.
+   *
+   * A boss standing on a chest of gold should not be punched to the same blip as everyone
+   * else; his three underlings, who are not that joke, should be. It is also what keeps the
+   * cue worth hearing: a sound that plays for all four fights on a stage is the stage's
+   * background noise, while one that starts when the boss appears marks his arrival.
+   */
+  hitSound?: HitSound;
   /** What makes this fight different. Minions never have any. */
   abilities: BossAbility[];
   minions: MinionDef[];
@@ -64,55 +77,63 @@ interface RawBoss {
   critMultiplier: number;
   color: string;
   icon: string;
+  hitSound?: HitSound;
   abilities: BossAbility[];
   minions: [string, string, string];
 }
 
 const RAW: RawBoss[] = [
   {
+    // The id is the one thing here that must never change: finished bosses are remembered by
+    // it, so renaming would quietly erase somebody's victories. Only the labels are swapped.
     id: 'grunt',
-    name: 'Оскал',
-    nameGenitive: 'Оскала',
-    title: 'Тот, кто скалится первым',
-    phrase: 'Опусти телефон. Тебе и одного не хватит.',
+    name: 'Мистер Крабс',
+    nameGenitive: 'Мистера Крабса',
+    title: 'Берёт плату вперёд',
+    phrase: 'Каждый повтор — мне в кассу. Не жадничай.',
     budget: 60,
     baseDamage: 10,
     critChance: 0.12,
     critMultiplier: 2,
-    color: '#9ca3af',
+    color: '#e0a423',
     icon: '01-grunt.jpg',
+    hitSound: 'coins',
     abilities: [{ kind: 'armor', value: 0.1 }],
-    minions: ['Шестёрка', 'Подпевала', 'Гопник'],
+    minions: ['Сквидвард', 'Губка Боб', 'Планктон'],
   },
   {
+    // Same rule as above: the id stays, only what's on screen changes.
     id: 'brawler',
-    name: 'Мясник',
-    nameGenitive: 'Мясника',
-    title: 'Работает без перчаток',
-    phrase: 'Ты не тренируешься. Ты позируешь.',
+    name: 'Король Свин',
+    nameGenitive: 'Короля Свина',
+    title: 'Корона тяжелее него',
+    phrase: 'Яйца я уже украл. Теперь давай повторы.',
     budget: 150,
     baseDamage: 10,
     critChance: 0.13,
     critMultiplier: 2,
-    color: '#c17a3f',
+    color: '#7ab23c',
     icon: '02-brawler.jpg',
+    hitSound: 'oink',
     abilities: [{ kind: 'armor', value: 0.15 }],
-    minions: ['Крюк', 'Обвалка', 'Тесак'],
+    minions: ['Капрал', 'Сержант', 'Повар'],
   },
   {
+    // Again: the id is load-bearing, the labels are not.
     id: 'berserker',
-    name: 'Живодёр',
-    nameGenitive: 'Живодёра',
-    title: 'Снимает по одному слою',
-    phrase: 'Руки дрожат? А ты ещё не начал.',
+    name: 'Грю',
+    // Indeclinable, so the genitive is the same word — «подчинённый Грю».
+    nameGenitive: 'Грю',
+    title: 'Украл Луну, украдёт и подход',
+    phrase: 'У меня целая армия помощников. У тебя — только руки.',
     budget: 280,
     baseDamage: 10,
     critChance: 0.14,
     critMultiplier: 2.2,
-    color: '#b5432b',
+    color: '#9b6bd6',
     icon: '03-berserker.jpg',
     abilities: [{ kind: 'xpDrain', value: 0.15 }],
-    minions: ['Свежеватель', 'Скорняк', 'Лоскут'],
+    minions: ['Боб', 'Стюарт', 'Кевин'],
   },
   {
     id: 'steelguard',
@@ -313,6 +334,7 @@ export const BOSSES: BossDef[] = RAW.map((r, index) => ({
   critMultiplier: r.critMultiplier,
   color: r.color,
   icon: r.icon,
+  hitSound: r.hitSound,
   abilities: r.abilities,
   minions: r.minions.map((name, i) => ({
     id: `${r.id}-m${i + 1}`,

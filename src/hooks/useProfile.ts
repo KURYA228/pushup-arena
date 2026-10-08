@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, PROFILE_ID } from '../db/db';
-import type { ProfileRecord, RepResult, RepUndo } from '../types';
+import type { ProfileRecord, RepLogEntry, RepResult, RepUndo } from '../types';
 import { RUSH_XP_PER_REP, XP_PER_REP, levelFromTotalXp, streakMultiplier } from '../data/leveling';
 import { getRank } from '../data/ranks';
 import {
@@ -13,13 +13,10 @@ import {
 } from '../data/bosses';
 import { applyIdleRegen, freshFight, resolveArenaRep } from '../data/combat';
 import { checkNewAchievements } from '../data/achievements';
-
-const todayStr = () => new Date().toISOString().slice(0, 10);
-const yesterdayStr = () => {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
-};
+import { SEASON, isStale } from '../lib/season';
+import { clearMark } from '../lib/syncMark';
+import { MAX_FREEZES, STARTING_FREEZES, advanceStreak, freezesOf, todayLocal } from '../lib/streak';
+import { FREEZE_COST, UPGRADES, nextCost, perksFrom, upgradeLevel, type UpgradeId } from '../data/shop';
 
 function defaultProfile(): ProfileRecord {
   return {
@@ -36,7 +33,9 @@ function defaultProfile(): ProfileRecord {
     achievementsUnlocked: [],
     rushBestReps: 0,
     rushBestCombo: 0,
+    streakFreezes: STARTING_FREEZES,
     createdAt: new Date().toISOString(),
+    season: SEASON,
   };
 }
 
@@ -58,23 +57,48 @@ function migrate(p: ProfileRecord): ProfileRecord {
 
 async function ensureProfile(): Promise<ProfileRecord> {
   const existing = await db.profile.get(PROFILE_ID);
-  if (existing) {
+  if (existing && !isStale(existing.season)) {
     const migrated = migrate(existing);
     if (migrated !== existing) await db.profile.put(migrated);
     return migrated;
   }
+  // A save from a season that's over is not migrated, it's replaced — that's what a reset is.
+  // The sync mark goes with it: it records an agreement with the server about numbers that no
+  // longer exist, and leaving it behind would make the next sync draw conclusions from it.
+  if (existing) clearMark();
   const fresh = defaultProfile();
-  await db.profile.put(fresh);
+  await db.transaction('rw', db.profile, db.reps, async () => {
+    await db.profile.put(fresh);
+    await db.reps.clear();
+  });
   return fresh;
 }
 
-/** Streak logic: same day = unchanged, consecutive day = +1, gap = reset to 1. */
-function nextStreak(p: ProfileRecord): number {
-  const today = todayStr();
-  if (p.lastWorkoutDate === today) return p.streak;
-  if (p.lastWorkoutDate === yesterdayStr()) return p.streak + 1;
-  return 1;
+/**
+ * Saves the profile and appends the rep to the log in one transaction, so the stats can never
+ * disagree with the totals. Returns the log row's id for undo.
+ */
+async function commitRep(updated: ProfileRecord, entry: Omit<RepLogEntry, 'id' | 'season'>) {
+  return db.transaction('rw', db.profile, db.reps, async () => {
+    await db.profile.put(updated);
+    return (await db.reps.add({ ...entry, season: SEASON })) as number;
+  });
 }
+
+/**
+ * One press of «+» (or −1 to take one back). Only the clicker moves — see `clickerTaps`.
+ * A plain function rather than part of the hook: the counter panel calls it directly.
+ */
+export async function bumpClicker(delta: 1 | -1): Promise<void> {
+  const p = await ensureProfile();
+  await db.profile.put({ ...p, clickerTaps: Math.max(0, (p.clickerTaps ?? 0) + delta) });
+}
+
+const streakSnapshot = (p: ProfileRecord): RepUndo['streakBefore'] => ({
+  streak: p.streak,
+  lastWorkoutDate: p.lastWorkoutDate,
+  streakFreezes: p.streakFreezes,
+});
 
 export function useProfile() {
   useEffect(() => {
@@ -114,10 +138,11 @@ export function useProfile() {
       },
       Date.now(),
       Math.random(),
+      perksFrom(p.upgrades),
     );
 
-    const streak = nextStreak(p);
-    const xpGained = Math.round(XP_PER_REP * streakMultiplier(streak) * outcome.xpFactor);
+    const st = advanceStreak(p, todayLocal());
+    const xpGained = Math.round(XP_PER_REP * streakMultiplier(st.streak) * outcome.xpFactor);
     const beforeLevel = levelFromTotalXp(p.totalXp).level;
 
     let bonusXp = 0;
@@ -129,8 +154,9 @@ export function useProfile() {
       ...p,
       totalPushups: p.totalPushups + 1,
       totalXp,
-      streak,
-      lastWorkoutDate: todayStr(),
+      streak: st.streak,
+      lastWorkoutDate: st.lastWorkoutDate,
+      streakFreezes: st.streakFreezes,
       currentBossIndex: outcome.next.bossIndex,
       stageStep: outcome.next.stageStep,
       enemyHp: Math.max(0, outcome.next.enemyHp),
@@ -141,7 +167,14 @@ export function useProfile() {
     if (newAchievements.length) {
       updated.achievementsUnlocked = [...updated.achievementsUnlocked, ...newAchievements];
     }
-    await db.profile.put(updated);
+    const logId = await commitRep(updated, {
+      at: Date.now(),
+      mode: 'arena',
+      bossIndex,
+      stageStep: p.stageStep,
+      damage: outcome.damage,
+      crit: outcome.isCrit,
+    });
 
     const afterLevel = levelFromTotalXp(totalXp).level;
     return {
@@ -158,6 +191,8 @@ export function useProfile() {
       healed: outcome.healed,
       enemyName: outcome.enemyName,
       newAchievements,
+      frozeDays: st.frozeDays,
+      earnedFreeze: st.earnedFreeze,
       undo: {
         xp: xpGained + bonusXp,
         enemyHpBefore: p.enemyHp,
@@ -166,6 +201,8 @@ export function useProfile() {
         fightBefore: p.fight,
         bossIdDefeated: outcome.bossDefeated ? boss.id : null,
         achievementsGranted: newAchievements,
+        streakBefore: streakSnapshot(p),
+        logId,
       },
     };
   }, []);
@@ -173,22 +210,30 @@ export function useProfile() {
   /** One rep in Speed Rush mode: adds XP + pushup count only, no boss interaction. */
   const registerRushRep = useCallback(async (): Promise<RepResult> => {
     const p = await ensureProfile();
-    const streak = nextStreak(p);
-    const xpGained = Math.round(RUSH_XP_PER_REP * streakMultiplier(streak));
+    const st = advanceStreak(p, todayLocal());
+    const xpGained = Math.round(RUSH_XP_PER_REP * streakMultiplier(st.streak));
     const beforeLevel = levelFromTotalXp(p.totalXp).level;
     const totalXp = p.totalXp + xpGained;
     const updated: ProfileRecord = {
       ...p,
       totalPushups: p.totalPushups + 1,
       totalXp,
-      streak,
-      lastWorkoutDate: todayStr(),
+      streak: st.streak,
+      lastWorkoutDate: st.lastWorkoutDate,
+      streakFreezes: st.streakFreezes,
     };
     const newAchievements = checkNewAchievements(updated);
     if (newAchievements.length) {
       updated.achievementsUnlocked = [...updated.achievementsUnlocked, ...newAchievements];
     }
-    await db.profile.put(updated);
+    const logId = await commitRep(updated, {
+      at: Date.now(),
+      mode: 'rush',
+      bossIndex: null,
+      stageStep: null,
+      damage: 0,
+      crit: false,
+    });
     const afterLevel = levelFromTotalXp(totalXp).level;
     return {
       xpGained,
@@ -204,6 +249,8 @@ export function useProfile() {
       healed: 0,
       enemyName: '',
       newAchievements,
+      frozeDays: st.frozeDays,
+      earnedFreeze: st.earnedFreeze,
       undo: {
         xp: xpGained,
         enemyHpBefore: null,
@@ -212,6 +259,8 @@ export function useProfile() {
         fightBefore: null,
         bossIdDefeated: null,
         achievementsGranted: newAchievements,
+        streakBefore: streakSnapshot(p),
+        logId,
       },
     };
   }, []);
@@ -231,6 +280,7 @@ export function useProfile() {
         fight: p.fight,
       },
       Date.now(),
+      perksFrom(p.upgrades),
     );
     if (healed <= 0) return 0;
     await db.profile.put({ ...p, enemyHp: state.enemyHp, fight: state.fight });
@@ -267,6 +317,9 @@ export function useProfile() {
       ...p,
       totalPushups: Math.max(0, p.totalPushups - 1),
       totalXp: Math.max(0, p.totalXp - undo.xp),
+      // Undo pops in reverse order, so the snapshot from this rep is exactly the state before it
+      // — including a freeze it spent or earned.
+      ...undo.streakBefore,
       achievementsUnlocked: undo.achievementsGranted.length
         ? p.achievementsUnlocked.filter((id) => !undo.achievementsGranted.includes(id))
         : p.achievementsUnlocked,
@@ -280,7 +333,41 @@ export function useProfile() {
         updated.bossesDefeated = p.bossesDefeated.filter((id) => id !== undo.bossIdDefeated);
       }
     }
-    await db.profile.put(updated);
+    await db.transaction('rw', db.profile, db.reps, async () => {
+      await db.profile.put(updated);
+      if (undo.logId != null) await db.reps.delete(undo.logId);
+    });
+  }, []);
+
+  /**
+   * Buys the next level of an upgrade. XP comes straight off the total, so the level can drop.
+   * Re-checked against the saved profile rather than trusting the button: two quick taps must
+   * not buy twice on one balance.
+   */
+  const buyUpgrade = useCallback(async (id: UpgradeId): Promise<boolean> => {
+    const def = UPGRADES.find((u) => u.id === id);
+    if (!def) return false;
+    return db.transaction('rw', db.profile, db.reps, async () => {
+      const p = await ensureProfile();
+      const cost = nextCost(p.upgrades, def);
+      if (cost == null || p.totalXp < cost) return false;
+      await db.profile.put({
+        ...p,
+        totalXp: p.totalXp - cost,
+        upgrades: { ...p.upgrades, [id]: upgradeLevel(p.upgrades, id) + 1 },
+      });
+      return true;
+    });
+  }, []);
+
+  const buyFreeze = useCallback(async (): Promise<boolean> => {
+    return db.transaction('rw', db.profile, db.reps, async () => {
+      const p = await ensureProfile();
+      const have = freezesOf(p);
+      if (have >= MAX_FREEZES || p.totalXp < FREEZE_COST) return false;
+      await db.profile.put({ ...p, totalXp: p.totalXp - FREEZE_COST, streakFreezes: have + 1 });
+      return true;
+    });
   }, []);
 
   /**
@@ -303,7 +390,10 @@ export function useProfile() {
   }, []);
 
   const devResetProfile = useCallback(async () => {
-    await db.profile.put(defaultProfile());
+    await db.transaction('rw', db.profile, db.reps, async () => {
+      await db.profile.put(defaultProfile());
+      await db.reps.clear();
+    });
   }, []);
 
   return {
@@ -314,6 +404,8 @@ export function useProfile() {
     finishRush,
     tickArena,
     revertRep,
+    buyUpgrade,
+    buyFreeze,
     restoreProfile,
     devPatchProfile,
     devResetProfile,

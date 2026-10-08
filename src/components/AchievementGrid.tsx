@@ -14,7 +14,7 @@ export function AchievementGrid({ unlockedIds }: { unlockedIds: string[] }) {
 
   return (
     <>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-4 gap-2 md:grid-cols-8 md:gap-3 xl:grid-cols-6">
         {ACHIEVEMENTS.map((a) => {
           const unlocked = unlockedIds.includes(a.id);
           const active = a.id === selectedId;

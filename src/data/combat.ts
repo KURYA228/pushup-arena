@@ -8,6 +8,7 @@ import {
   xpMultiplier,
 } from './abilities.ts';
 import { BOSSES, BOSS_STEP, encounterAt } from './bosses.ts';
+import { NO_PERKS, type PlayerPerks } from './shop.ts';
 
 /**
  * Arena combat, as one pure function.
@@ -103,7 +104,11 @@ export function freshFight(enemyHp: number): FightState {
  * the pressure is supposed to be felt. Whole ticks are consumed from `regenAt` rather than
  * measuring against "now", so calling this once a second or once an hour gives the same result.
  */
-export function applyIdleRegen(state: ArenaState, now: number): { state: ArenaState; healed: number } {
+export function applyIdleRegen(
+  state: ArenaState,
+  now: number,
+  perks: PlayerPerks = NO_PERKS,
+): { state: ArenaState; healed: number } {
   const boss = BOSSES[Math.min(state.bossIndex, BOSSES.length - 1)];
   const enemy = encounterAt(boss, state.stageStep);
   const from = state.fight.regenAt;
@@ -111,7 +116,9 @@ export function applyIdleRegen(state: ArenaState, now: number): { state: ArenaSt
     return { state, healed: 0 };
   }
 
-  const ticks = Math.floor((now - from) / SET_BREAK_MS);
+  // "Второе дыхание" stretches the tick: the boss waits longer before he starts to heal.
+  const interval = SET_BREAK_MS + perks.breathMs;
+  const ticks = Math.floor((now - from) / interval);
   if (ticks <= 0) return { state, healed: 0 };
 
   // Ceiling taken from the encounter, not from fight state: a stale `enemyMaxHp` (a dev-panel
@@ -122,7 +129,7 @@ export function applyIdleRegen(state: ArenaState, now: number): { state: ArenaSt
   const hp = Math.max(state.enemyHp, Math.min(max, state.enemyHp + ticks * perTick));
 
   return {
-    state: { ...state, enemyHp: hp, fight: { ...state.fight, regenAt: from + ticks * SET_BREAK_MS } },
+    state: { ...state, enemyHp: hp, fight: { ...state.fight, regenAt: from + ticks * interval } },
     healed: hp - state.enemyHp,
   };
 }
@@ -152,8 +159,14 @@ function startEncounter(state: ArenaState, bossIndex: number, step: number, carr
  *
  * @param now  Milliseconds; only differences matter.
  * @param roll Crit roll in [0, 1) — injected rather than drawn inside so tests are deterministic.
+ * @param perks What the player has bought in the shop; none by default.
  */
-export function resolveArenaRep(state: ArenaState, now: number, roll: number): RepOutcome {
+export function resolveArenaRep(
+  state: ArenaState,
+  now: number,
+  roll: number,
+  perks: PlayerPerks = NO_PERKS,
+): RepOutcome {
   const bossIndex = Math.min(state.bossIndex, BOSSES.length - 1);
   const boss = BOSSES[bossIndex];
   const step = state.stageStep;
@@ -164,14 +177,14 @@ export function resolveArenaRep(state: ArenaState, now: number, roll: number): R
 
   // Regeneration is settled first and by the clock, so the reps that follow hit the HP the boss
   // actually has after your rest — not the HP you left him on.
-  const regen = applyIdleRegen(state, now);
+  const regen = applyIdleRegen(state, now, perks);
   let fight = { ...regen.state.fight };
   let enemyHp = regen.state.enemyHp;
   let healed = regen.healed;
 
   // --- settle the pause that just ended -------------------------------------------------
   const gap = fight.lastRepAt == null ? 0 : now - fight.lastRepAt;
-  const setEnded = fight.lastRepAt == null || gap >= SET_BREAK_MS;
+  const setEnded = fight.lastRepAt == null || gap >= SET_BREAK_MS + perks.breathMs;
 
   if (setEnded && fight.lastRepAt != null) {
     if (enemy.isBoss && hasAbility(abilities, 'bloodDebt')) {
@@ -180,7 +193,7 @@ export function resolveArenaRep(state: ArenaState, now: number, roll: number): R
       healed += after - enemyHp;
       enemyHp = after;
     }
-    if (enemy.isBoss && hasAbility(abilities, 'noStop') && gap >= NO_STOP_MS) {
+    if (enemy.isBoss && hasAbility(abilities, 'noStop') && gap >= NO_STOP_MS + perks.breathMs) {
       // Everything landed since the set began is undone, not merely reduced.
       const after = Math.min(fight.enemyMaxHp, Math.max(enemyHp, fight.hpAtSetStart));
       healed += after - enemyHp;
@@ -215,10 +228,10 @@ export function resolveArenaRep(state: ArenaState, now: number, roll: number): R
   let isCrit = false;
   let damage = 0;
   if (!blocked) {
-    isCrit = critLands(abilities, roll < boss.critChance);
+    isCrit = critLands(abilities, roll < boss.critChance + perks.critBonus);
     damage = damageDealt(
-      boss.baseDamage,
-      boss.critMultiplier,
+      boss.baseDamage * perks.damageMult,
+      boss.critMultiplier + perks.critMultBonus,
       isCrit,
       abilities,
       fight.enemyMaxHp > 0 ? enemyHp / fight.enemyMaxHp : 1,

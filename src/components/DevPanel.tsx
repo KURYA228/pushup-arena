@@ -7,6 +7,9 @@ import { freshFight } from '../data/combat';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { totalXpForLevel } from '../data/leveling';
 import { BossIcon } from './BossIcon';
+import { MAX_FREEZES, freezesOf, todayLocal } from '../lib/streak';
+import { setPlusCountsReps, usePlusCountsReps } from '../lib/devFlags';
+import { forgetIntro } from '../lib/intro';
 
 /**
  * Debug controls for jumping around the game state without grinding reps. Writes go through the
@@ -24,6 +27,7 @@ export function DevPanel({
   reset: () => Promise<void>;
   onClose: () => void;
 }) {
+  const plusCounts = usePlusCountsReps();
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -147,9 +151,14 @@ export function DevPanel({
             value={profile.streak}
             min={0}
             max={9999}
-            onApply={(v) =>
-              void patch({ streak: v, lastWorkoutDate: v > 0 ? new Date().toISOString().slice(0, 10) : null })
-            }
+            onApply={(v) => void patch({ streak: v, lastWorkoutDate: v > 0 ? todayLocal() : null })}
+          />
+          <NumberField
+            label="заморозки стрика"
+            value={freezesOf(profile)}
+            min={0}
+            max={MAX_FREEZES}
+            onApply={(v) => void patch({ streakFreezes: v })}
           />
           <NumberField
             label="рекорд Rush"
@@ -167,6 +176,34 @@ export function DevPanel({
             </Action>
             <Action onClick={() => void patch({ achievementsUnlocked: [] })}>Закрыть все</Action>
           </Row>
+        </Group>
+
+        <Group title="Кнопка «+»">
+          <Row>
+            <Action onClick={() => setPlusCountsReps(false)}>
+              {plusCounts ? 'Кликер' : '✓ Кликер'}
+            </Action>
+            <Action onClick={() => setPlusCountsReps(true)}>
+              {plusCounts ? '✓ Отжимания' : 'Отжимания'}
+            </Action>
+          </Row>
+          <p className="text-[10px] leading-snug text-arena-text-dim">
+            {plusCounts
+              ? '«+» бьёт босса, даёт XP и идёт в общий счёт — как отжимание с камеры. Только на этом устройстве.'
+              : '«+» считает только нажатия в кликер и не влияет на игру.'}
+          </p>
+        </Group>
+
+        <Group title="Интро">
+          <button
+            onClick={() => {
+              forgetIntro();
+              window.location.reload();
+            }}
+            className="w-full rounded-lg bg-arena-surface-2 px-3 py-2 text-xs font-medium text-arena-text active:scale-95"
+          >
+            Показать заново
+          </button>
         </Group>
 
         <Group title="Опасное">

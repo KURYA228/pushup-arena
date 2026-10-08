@@ -7,12 +7,18 @@ export function BossIcon({
   boss,
   index,
   size,
+  maxWidth,
   className,
+  bare = false,
+  ratio,
 }: {
   boss: BossDef;
   index: number;
   size: number;
+  maxWidth?: number;
   className?: string;
+  bare?: boolean;
+  ratio?: number;
 }) {
   return (
     <EnemyIcon
@@ -20,7 +26,10 @@ export function BossIcon({
       color={boss.color}
       tier={bossTier(index)}
       size={size}
+      maxWidth={maxWidth}
       className={className}
+      bare={bare}
+      ratio={ratio}
     />
   );
 }

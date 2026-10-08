@@ -13,6 +13,11 @@
  *  - Browsers refuse to start an AudioContext outside a user gesture, hence `installAudioUnlock`.
  */
 
+// The one thing the sound needs from the picture: when the boss lands. Kept there rather
+// than copied here, because two numbers meaning the same moment drift apart the first time
+// one of them is tuned.
+import { LAND_SEC } from './bossCut';
+
 export interface FeedbackPrefs {
   sound: boolean;
   vibration: boolean;
@@ -71,7 +76,11 @@ export function installAudioUnlock() {
   }
 
   const arm = () => {
-    audioContext();
+    const c = audioContext();
+    // Fetched at the first tap rather than on the first rep. Decoding takes a moment, and the
+    // rep that needs the sound is the one that just happened — a cue that arrives late is
+    // worse than the synthesised one that arrives on time.
+    if (c) for (const name of Object.keys(SAMPLES) as SampleName[]) loadSample(c, name);
     // Speech needs its own gesture-time nudge on iOS. A silent utterance is enough to unlock it.
     if (speechSupported()) {
       try {
@@ -89,6 +98,91 @@ export function installAudioUnlock() {
   window.addEventListener('pointerdown', arm, { once: true });
   window.addEventListener('touchstart', arm, { once: true });
   window.addEventListener('keydown', arm, { once: true });
+}
+
+/* ----------------------------- recorded cues ----------------------------- */
+
+/**
+ * The one recorded sound in here; everything else on this screen is synthesised.
+ *
+ * A real recording of coins is doing something the oscillators cannot: dozens of pieces of
+ * metal striking each other at once, each with its own ring and its own moment. That is worth
+ * fetching a file for — but only where it earns its place, which is the boss whose whole joke
+ * is money.
+ *
+ * The file is the pour only. The recording ran on for another second and a half of a single
+ * coin spinning down on the table, which is a lovely sound and completely wrong here: it is
+ * longer than the gap between two push-ups, so every rep would start before the last one had
+ * finished whirring and the screen would sound like a tumble dryer full of change.
+ */
+const SAMPLES = {
+  coins: 'sfx/coins.m4a',
+  oink: 'sfx/oink.m4a',
+  bossfight: 'sfx/bossfight.m4a',
+} as const;
+type SampleName = keyof typeof SAMPLES;
+
+/** The ones a stage can name as its rep cue; the rest belong to a particular moment. */
+export type RepSample = Extract<SampleName, 'coins' | 'oink'>;
+
+const loaded = new Map<SampleName, AudioBuffer>();
+const failed = new Set<SampleName>();
+const fetching: Partial<Record<SampleName, boolean>> = {};
+
+/**
+ * Pulls a sample into memory. Safe to call repeatedly: the second call is a no-op while the
+ * first is in flight, and a sample that cannot be fetched or decoded is marked off rather
+ * than retried on every rep.
+ */
+function loadSample(c: AudioContext, name: SampleName) {
+  if (loaded.has(name) || failed.has(name) || fetching[name]) return;
+  fetching[name] = true;
+  void (async () => {
+    try {
+      const res = await fetch(`${import.meta.env.BASE_URL}${SAMPLES[name]}`);
+      if (!res.ok) throw new Error(String(res.status));
+      loaded.set(name, await c.decodeAudioData(await res.arrayBuffer()));
+    } catch {
+      // Offline, missing file, or a container this browser won't decode. The synthesised
+      // version below covers all three, so there is nothing to report and nothing to retry.
+      failed.add(name);
+    } finally {
+      fetching[name] = false;
+    }
+  })();
+}
+
+/**
+ * Plays a loaded sample, or reports that it could not.
+ *
+ * Pitch and level are nudged a few percent each time. One recording played back identically
+ * forty times in a set stops being a sound and becomes a tick — the same reason the
+ * synthesised coins below re-roll their partials on every call.
+ */
+function playSample(c: AudioContext, name: SampleName, peak: number, opts?: Spoken): boolean {
+  const buffer = loaded.get(name);
+  if (!buffer) return false;
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  // Left alone for anything with words in it: a few percent of playback rate is unnoticeable
+  // on a clatter of metal and turns a voice into a different person each time.
+  if (!opts?.exact) src.playbackRate.value = 0.94 + Math.random() * 0.12;
+  const gain = c.createGain();
+  gain.gain.value = peak * (opts?.exact ? 1 : 0.85 + Math.random() * 0.3);
+  src.connect(gain).connect(output(c));
+  // Scheduled on the audio clock rather than a setTimeout. A timer fires whenever the main
+  // thread next gets round to it, which during the cut is while sixteen sparks are being
+  // animated — exactly the wrong moment to be asking it for millisecond accuracy.
+  src.start(c.currentTime + (opts?.delay ?? 0));
+  return true;
+}
+
+/** Playback options for a sample that is a recording of someone speaking. */
+interface Spoken {
+  /** Seconds from now. */
+  delay?: number;
+  /** Play it at the pitch and level it was recorded at, with no per-call variation. */
+  exact?: boolean;
 }
 
 // Everything is routed through one compressor. Low sawtooth drones stack up fast, and without
@@ -297,15 +391,53 @@ export function playCrit(prefs: FeedbackPrefs) {
   buzz(prefs, [45, 30, 70]);
 }
 
+/**
+ * Coins landing on coins.
+ *
+ * Struck metal is inharmonic — its partials aren't whole multiples of a fundamental, which is
+ * the whole difference between a coin and a musical note. The ratios below (1 / 1.47 / 2.09)
+ * are deliberately awkward for that reason. Two pings land a breath apart, because one coin
+ * on its own reads as a doorbell, and everything is re-rolled per call so a set doesn't turn
+ * into the same click forty times.
+ */
+function coins(c: AudioContext, peak: number) {
+  const base = 1950 + Math.random() * 500;
+  const second = 0.045 + Math.random() * 0.04;
+
+  for (const [at, gain] of [
+    [0, peak],
+    [second, peak * 0.7],
+  ] as const) {
+    const pitch = base * (at === 0 ? 1 : 0.86 + Math.random() * 0.2);
+    // The strike itself: a hard, bright transient with no pitch of its own.
+    hit(c, 5200, 1.6, at, 0.03, gain * 0.5);
+    sweep(c, pitch, pitch * 0.985, at, 0.18, gain, 'sine');
+    sweep(c, pitch * 1.47, pitch * 1.45, at, 0.13, gain * 0.55, 'sine');
+    sweep(c, pitch * 2.09, pitch * 2.05, at, 0.09, gain * 0.3, 'sine');
+  }
+}
+
 /** A counted rep. Crits get their own cue so you can hear one without looking at the screen. */
-export function playRep(prefs: FeedbackPrefs, crit = false) {
+export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepSample) {
   if (crit) {
     playCrit(prefs);
     return;
   }
   if (prefs.sound) {
     const c = audioContext();
-    if (c) tone(c, 880, 0, 0.09);
+    if (c) {
+      // The recording where there is one, something synthesised where there isn't. A sample
+      // can still be in flight on the first rep of a session, or fail to decode entirely,
+      // and this screen must never answer a counted rep with silence — that is the one thing
+      // the player is listening for with their face at the floor.
+      if (sound) {
+        loadSample(c, sound);
+        if (!playSample(c, sound, 0.5)) {
+          if (sound === 'coins') coins(c, 0.18);
+          else tone(c, 880, 0, 0.09);
+        }
+      } else tone(c, 880, 0, 0.09);
+    }
   }
   buzz(prefs, 22);
 }
@@ -336,9 +468,26 @@ export function playLevelUp(prefs: FeedbackPrefs) {
 /** Announces that the minions are done and the boss is in front of you. */
 export function playBossEncounter(prefs: FeedbackPrefs) {
   if (prefs.sound) {
-    // Lowest pitch the speech API allows, and slow enough to land as a pronouncement.
-    const spoken = speak('Boss', 0.6, 0);
     const c = audioContext();
+
+    // The recorded call, held back until the word actually lands on screen. Everything else
+    // in here plays at once, under the darkening — this is the only cue that has to hit a
+    // mark, and the mark is the instant the composition is thrown into place.
+    let announced = false;
+    if (c) {
+      loadSample(c, 'bossfight');
+      announced = playSample(c, 'bossfight', 0.85, { delay: LAND_SEC, exact: true });
+    }
+
+    // Failing that, the speech synthesiser says the word instead — lowest pitch it allows and
+    // slow enough to land as a pronouncement. It cannot be scheduled, so it goes on a timer;
+    // a few milliseconds either way matter far less than having nothing to announce with.
+    if (!announced && speechSupported()) {
+      announced = true;
+      window.setTimeout(() => speak('Boss', 0.6, 0), LAND_SEC * 1000);
+    }
+    const spoken = announced;
+
     if (c) {
       // Deliberately atonal. An earlier version stacked two sawtooths a tritone apart, which is
       // a chord however low you put it — and a chord with a soft attack sounds like a piano, not

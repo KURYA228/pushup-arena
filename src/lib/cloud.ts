@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient, type Session } from '@supabase/supabase-js';
 import type { ProfileRecord } from '../types';
+import { streakView, todayLocal } from './streak';
+import { isStale } from './season';
 
 /**
  * Accounts and the leaderboard, over Supabase.
@@ -23,9 +25,162 @@ export function cloudConfigured(): boolean {
   return Boolean(url && anonKey);
 }
 
+/* ------------------------------------------------------------------ *
+ * Remembering the device
+ *
+ * The session token has to outlive the tab, or every visit starts with a
+ * login form — which for a gym app means typing a password with wet hands.
+ * Two switches control that: where the token is kept (localStorage survives
+ * a restart, sessionStorage dies with the tab), and whether the browser is
+ * allowed to evict our storage at all.
+ * ------------------------------------------------------------------ */
+
+const AUTH_STORAGE_KEY = 'arena.auth';
+const REMEMBER_KEY = 'arena.rememberDevice';
+const LAST_ACCOUNT_KEY = 'arena.lastAccount';
+
+type StoreKind = 'local' | 'session';
+
+/** Every access is guarded: private mode throws on the property itself, not just on use. */
+function store(kind: StoreKind): Storage | null {
+  try {
+    return kind === 'local' ? window.localStorage : window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function read(kind: StoreKind, key: string): string | null {
+  try {
+    return store(kind)?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function write(kind: StoreKind, key: string, value: string) {
+  try {
+    store(kind)?.setItem(key, value);
+  } catch {
+    // Full or blocked storage. The user stays signed in for this tab and no more.
+  }
+}
+
+function drop(kind: StoreKind, key: string) {
+  try {
+    store(kind)?.removeItem(key);
+  } catch {
+    // Nothing to do — the value was unreachable anyway.
+  }
+}
+
+/** Remembering is the default; only an explicit "no" turns it off. */
+export function rememberDevice(): boolean {
+  return read('local', REMEMBER_KEY) !== '0';
+}
+
+export function setRememberDevice(on: boolean) {
+  write('local', REMEMBER_KEY, on ? '1' : '0');
+  // Move the token that already exists instead of waiting for the next refresh to rewrite it,
+  // so switching this off on a borrowed phone takes effect immediately.
+  const from: StoreKind = on ? 'session' : 'local';
+  const to: StoreKind = on ? 'local' : 'session';
+  const token = read(from, AUTH_STORAGE_KEY);
+  if (token !== null) {
+    write(to, AUTH_STORAGE_KEY, token);
+    drop(from, AUTH_STORAGE_KEY);
+  }
+  if (!on) forgetAccount();
+}
+
+const authStorage = {
+  getItem: (key: string) => read('local', key) ?? read('session', key),
+  setItem: (key: string, value: string) => {
+    const persist = rememberDevice();
+    write(persist ? 'local' : 'session', key, value);
+    drop(persist ? 'session' : 'local', key);
+  },
+  removeItem: (key: string) => {
+    drop('local', key);
+    drop('session', key);
+  },
+};
+
+/**
+ * Supabase names its token `sb-<project-ref>-auth-token` by default. Now that the key is ours,
+ * anyone already signed in would land on a login form after this update — so the old value is
+ * carried over once. The legacy copy is left in place: harmless, and it makes a rollback painless.
+ */
+function adoptLegacyToken() {
+  if (authStorage.getItem(AUTH_STORAGE_KEY)) return;
+  try {
+    const ref = new URL(url!).hostname.split('.')[0];
+    const legacy = read('local', `sb-${ref}-auth-token`);
+    if (legacy) write('local', AUTH_STORAGE_KEY, legacy);
+  } catch {
+    // Malformed URL — there was nothing to adopt.
+  }
+}
+
+/**
+ * Asks the browser to stop counting our data as disposable cache.
+ *
+ * This guards the whole save, not just the login: the game itself lives in IndexedDB, and Safari
+ * in particular throws away storage from sites you haven't opened in a week. Granted silently
+ * for an installed PWA; a plain tab may be refused, which is why the result is only advisory.
+ */
+export async function keepDataOnDevice(): Promise<boolean> {
+  try {
+    const s = navigator.storage;
+    if (!s?.persist) return false;
+    if (await s.persisted()) return true;
+    return await s.persist();
+  } catch {
+    return false;
+  }
+}
+
+/** Who signed in here last, so the next visit can greet them instead of interrogating them. */
+export interface LastAccount {
+  email: string;
+  name: string | null;
+}
+
+export function rememberAccount(email: string, name: string | null) {
+  if (!rememberDevice()) return;
+  const clean = email.trim();
+  if (!clean) return;
+  write('local', LAST_ACCOUNT_KEY, JSON.stringify({ email: clean, name }));
+}
+
+export function readLastAccount(): LastAccount | null {
+  const raw = read('local', LAST_ACCOUNT_KEY);
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<LastAccount>;
+    return typeof v.email === 'string' && v.email ? { email: v.email, name: v.name ?? null } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function forgetAccount() {
+  drop('local', LAST_ACCOUNT_KEY);
+}
+
 function supabase(): SupabaseClient | null {
   if (!cloudConfigured()) return null;
-  if (!client) client = createClient(url!, anonKey!);
+  if (!client) {
+    adoptLegacyToken();
+    client = createClient(url!, anonKey!, {
+      auth: {
+        storage: authStorage,
+        storageKey: AUTH_STORAGE_KEY,
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    });
+  }
   return client;
 }
 
@@ -71,6 +226,36 @@ function translate(message: string): string {
   return message;
 }
 
+/**
+ * Is a token sitting in storage, regardless of whether the server could be reached?
+ *
+ * `getSession()` answers `null` both when nobody ever signed in and when a perfectly good refresh
+ * token couldn't be exchanged because the network was down. Treating those the same is what threw
+ * a logged-in player back onto the password form the moment the connection dropped.
+ */
+export function hasStoredSession(): boolean {
+  const raw = authStorage.getItem(AUTH_STORAGE_KEY);
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // The shape has moved around between versions, so accept the wrappers too.
+    const s = (parsed?.currentSession ?? parsed?.session ?? parsed) as { refresh_token?: string };
+    return Boolean(s?.refresh_token);
+  } catch {
+    return false;
+  }
+}
+
+/** Tries the stored refresh token again — on a button, or the moment the network returns. */
+export async function retrySession(): Promise<Session | null> {
+  const db = supabase();
+  if (!db) return null;
+  const { data } = await db.auth.refreshSession();
+  if (data.session) return data.session;
+  const { data: fallback } = await db.auth.getSession();
+  return fallback.session;
+}
+
 export async function getSession(): Promise<Session | null> {
   const db = supabase();
   if (!db) return null;
@@ -112,13 +297,28 @@ export function rememberPendingName(name: string) {
   }
 }
 
-export function takePendingName(): string | null {
+/**
+ * Reads the pending name *without* consuming it.
+ *
+ * The earlier version deleted it on read, before anything had confirmed the public row was
+ * actually written. One failed write — a hiccup right after following the confirmation link, a
+ * name someone else had taken — and the name was gone for good: the player ended up with an
+ * account, no row in `players`, and therefore no place on the board at all. It's cleared by
+ * {@link clearPendingName} once the row exists.
+ */
+export function peekPendingName(): string | null {
   try {
-    const v = localStorage.getItem(PENDING_NAME_KEY);
-    if (v) localStorage.removeItem(PENDING_NAME_KEY);
-    return v;
+    return localStorage.getItem(PENDING_NAME_KEY);
   } catch {
     return null;
+  }
+}
+
+export function clearPendingName() {
+  try {
+    localStorage.removeItem(PENDING_NAME_KEY);
+  } catch {
+    // Nothing to clear if storage is unavailable.
   }
 }
 
@@ -166,8 +366,13 @@ export async function signIn(email: string, password: string): Promise<CloudErro
   return error ? { message: translate(error.message) } : null;
 }
 
-export async function signOut(): Promise<void> {
+/**
+ * Signing out keeps the address on file by default, so coming back is one password away.
+ * `forget` is the stronger version for a shared or borrowed device: it wipes that trace too.
+ */
+export async function signOut(forget = false): Promise<void> {
   await supabase()?.auth.signOut();
+  if (forget) forgetAccount();
 }
 
 /** Creates the public row on first sign-in, or renames it later. */
@@ -198,6 +403,18 @@ export async function getMyName(): Promise<string | null> {
  * Pushes the local profile up: the public numbers for the board, and the whole save for moving
  * between devices. Silent on failure — a lost sync must never interrupt a set.
  */
+/**
+ * Publishes one save: the public numbers and the full copy, both from the same profile.
+ *
+ * An earlier version took the maximum of each field against whatever the account already held.
+ * That kept the standing from falling when a stale device reported in, but it built the row out
+ * of pieces of different saves — reps from the phone next to a level from the laptop — and the
+ * result described nobody. The whole point of a row is that it is one person's actual state.
+ *
+ * Nothing guards against a stale device here any more, and nothing needs to: the caller waits
+ * for the sync to reconcile first, so by the time anything is published this device is either
+ * the one that's ahead or a copy of the account.
+ */
 export async function pushProfile(profile: ProfileRecord, level: number): Promise<void> {
   const db = supabase();
   if (!db) return;
@@ -205,31 +422,50 @@ export async function pushProfile(profile: ProfileRecord, level: number): Promis
   const id = data.user?.id;
   if (!id) return;
 
-  await db.from('players').update({
-    total_pushups: profile.totalPushups,
-    total_xp: profile.totalXp,
-    level,
-    streak: profile.streak,
-    bosses_defeated: profile.bossesDefeated.length,
-    rush_best_reps: profile.rushBestReps,
-  }).eq('id', id);
+  await db
+    .from('players')
+    .update({
+      total_pushups: profile.totalPushups,
+      total_xp: profile.totalXp,
+      level,
+      // The live streak, not the stored one: the stored number only changes on the next rep, so
+      // a streak that broke while the player was away would stay on the board indefinitely.
+      streak: streakView(profile, todayLocal()).streak,
+      bosses_defeated: profile.bossesDefeated.length,
+      rush_best_reps: profile.rushBestReps,
+    })
+    .eq('id', id);
 
   await db.from('saves').upsert({ id, profile: profile as unknown as Record<string, unknown> });
 }
 
 /** The save stored in the cloud, for pulling onto a second device. */
+/**
+ * The save stored in the cloud, or `null` when the account genuinely has none yet.
+ *
+ * **Throws** when the answer couldn't be obtained — a dropped connection, a refused request.
+ * That distinction is load-bearing: syncing treats "no save" as permission to publish this
+ * device's state, so quietly returning `null` on a network blip would let a fresh phone
+ * overwrite a year of progress.
+ */
 export async function fetchSave(): Promise<{ profile: ProfileRecord; updatedAt: string } | null> {
   const db = supabase();
   if (!db) return null;
   const { data: auth } = await db.auth.getUser();
   if (!auth.user) return null;
-  const { data } = await db
+  const { data, error } = await db
     .from('saves')
     .select('profile, updated_at')
     .eq('id', auth.user.id)
     .maybeSingle();
+  if (error) throw new Error(translate(error.message));
   if (!data?.profile) return null;
-  return { profile: data.profile as ProfileRecord, updatedAt: data.updated_at as string };
+  const profile = data.profile as ProfileRecord;
+  // A save from a season that's over is treated as no save at all, which is what closes the
+  // loop on a reset: the device wipes itself, then publishes the empty state over the top
+  // instead of being told the account is "ahead" and pulling the old progress back down.
+  if (isStale(profile.season)) return null;
+  return { profile, updatedAt: data.updated_at as string };
 }
 
 export async function fetchLeaderboard(limit = 50): Promise<LeaderboardRow[]> {

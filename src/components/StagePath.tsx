@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import { motion } from 'framer-motion';
 import { Check, Crown } from 'lucide-react';
 import type { BossDef } from '../data/bosses';
 
@@ -42,7 +43,7 @@ export function StagePath({
                   done || current ? 'bg-arena-amber/60' : 'bg-arena-border',
                 )}
               />
-              <span
+              <motion.span
                 className={clsx(
                   'flex shrink-0 items-center justify-center rounded-full border-2 transition-colors',
                   node.isBoss ? 'h-8 w-8' : 'h-6 w-6',
@@ -50,10 +51,27 @@ export function StagePath({
                   current && 'border-arena-amber bg-arena-surface-2',
                   !done && !current && 'border-arena-border bg-arena-surface',
                 )}
-                style={current ? { boxShadow: `0 0 0 4px ${color}33` } : undefined}
+                // The node you're on keeps a slow halo, so the eye finds your place on the route
+                // without reading any of the names.
+                animate={
+                  current
+                    ? { boxShadow: [`0 0 0 3px ${color}44`, `0 0 0 8px ${color}00`] }
+                    : { boxShadow: '0 0 0 0px transparent' }
+                }
+                transition={
+                  current
+                    ? { duration: 1.7, repeat: Infinity, ease: 'easeOut' }
+                    : { duration: 0.2 }
+                }
               >
                 {done ? (
-                  <Check size={node.isBoss ? 16 : 13} strokeWidth={3} />
+                  <motion.span
+                    initial={{ scale: 0, rotate: -90 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    transition={{ type: 'spring', stiffness: 520, damping: 20 }}
+                  >
+                    <Check size={node.isBoss ? 16 : 13} strokeWidth={3} />
+                  </motion.span>
                 ) : node.isBoss ? (
                   <Crown size={15} className={current ? 'text-arena-amber' : 'text-arena-text-dim'} />
                 ) : (
@@ -64,7 +82,7 @@ export function StagePath({
                     )}
                   />
                 )}
-              </span>
+              </motion.span>
               <span
                 className={clsx(
                   'h-0.5 flex-1 rounded-full',

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { HitSound } from '../data/bosses';
 import {
   installAudioUnlock,
   loadFeedbackPrefs,
@@ -34,7 +35,8 @@ export function useFeedback() {
       setSound: (on: boolean) => update({ sound: on }),
       setVibration: (on: boolean) => update({ vibration: on }),
       canVibrate: vibrationSupported(),
-      rep: (crit = false) => playRep(prefs, crit),
+      /** `sound` lets a stage ask for its own rep cue; left out, the ordinary beep plays. */
+      rep: (crit = false, sound?: HitSound) => playRep(prefs, crit, sound),
       bossDefeat: () => playBossDefeat(prefs),
       bossEncounter: () => playBossEncounter(prefs),
       levelUp: () => playLevelUp(prefs),

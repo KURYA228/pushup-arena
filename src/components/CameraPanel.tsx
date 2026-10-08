@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import {
   AlertTriangle,
@@ -17,6 +19,9 @@ import {
 import { usePoseDetection, type ModelQuality } from '../hooks/usePoseDetection';
 import type { Strictness } from '../lib/repDetector';
 import type { Feedback } from '../hooks/useFeedback';
+import { bumpClicker } from '../hooks/useProfile';
+import { usePlusCountsReps } from '../lib/devFlags';
+import { db, PROFILE_ID } from '../db/db';
 
 type Mode = 'manual' | 'camera';
 
@@ -74,9 +79,44 @@ export function CameraPanel({
 }) {
   const [mode, setMode] = useState<Mode>('manual');
   const [showSettings, setShowSettings] = useState(false);
+  /** Dev switch: «+» lands a real rep instead of a clicker tap. */
+  const plusCounts = usePlusCountsReps();
+  /** Taps made on this screen, so «−» in manual mode can take back exactly those and no more. */
+  const [sessionTaps, setSessionTaps] = useState(0);
+  const clickerTotal = useLiveQuery(() => db.profile.get(PROFILE_ID).then((p) => p?.clickerTaps ?? 0), []) ?? 0;
+
+  // Only the camera counts reps. The game — damage, XP, streak, the total — moves on nothing else.
   const pose = usePoseDetection(() => {
-    if (!disabled) onRep();
+    if (disabled) return;
+    onRep();
   });
+
+  /**
+   * «+» is a clicker: it counts presses and nothing more. A tap can't tell a push-up from a
+   * finger, so it stays out of the game entirely and keeps its own tally instead.
+   */
+  const addByHand = () => {
+    if (disabled) return;
+    if (plusCounts) {
+      onRep();
+      return;
+    }
+    void bumpClicker(1);
+    setSessionTaps((n) => n + 1);
+    feedback.rep();
+  };
+
+  // «−» undoes whatever the current mode adds: a tap in manual mode, a counted rep on camera.
+  // With the dev switch on, «+» adds reps, so «−» takes reps back in both modes.
+  const undoesClicks = mode === 'manual' && !plusCounts;
+  const canTakeBack = undoesClicks ? sessionTaps > 0 : canUndo;
+  const takeBack = () => {
+    if (disabled || !canTakeBack) return;
+    if (undoesClicks) {
+      void bumpClicker(-1);
+      setSessionTaps((n) => n - 1);
+    } else onUndo();
+  };
 
   const { start, stop } = pose;
   useEffect(() => {
@@ -128,7 +168,7 @@ export function CameraPanel({
               with the video instead of being stretched against a fixed 3:4 box. */}
           <div
             style={{ aspectRatio: String(pose.aspect) }}
-            className="relative mx-auto w-full max-w-xs overflow-hidden rounded-2xl border border-arena-border bg-black"
+            className="relative mx-auto w-full max-w-xs overflow-hidden rounded-2xl border border-arena-border bg-black md:max-w-md xl:max-w-lg"
           >
             <video
               ref={pose.videoRef}
@@ -280,25 +320,39 @@ export function CameraPanel({
         </div>
       )}
 
-      <div className="flex items-center justify-center gap-4">
+      <div className="relative flex items-center justify-center gap-4">
         <button
-          onClick={onUndo}
-          disabled={disabled || !canUndo}
-          aria-label="Убрать одно повторение"
+          onClick={takeBack}
+          disabled={disabled || !canTakeBack}
+          aria-label={undoesClicks ? 'Убрать одно нажатие кликера' : 'Убрать одно повторение'}
           className="flex h-12 w-12 items-center justify-center rounded-full border border-arena-border bg-arena-surface-2 text-arena-text-dim active:scale-95 disabled:opacity-30"
         >
           <Minus size={20} />
         </button>
-        <button
-          onClick={() => !disabled && onRep()}
+        <motion.button
+          onClick={addByHand}
           disabled={disabled}
-          aria-label="Добавить одно повторение"
+          aria-label={plusCounts ? 'Добавить одно повторение (dev)' : 'Кликер: добавить нажатие'}
+          whileTap={{ scale: 0.9 }}
           className="arena-glow flex h-16 w-16 items-center justify-center rounded-full bg-arena-amber text-black active:scale-95 disabled:opacity-30"
         >
           <Plus size={26} strokeWidth={2.6} />
-        </button>
+        </motion.button>
         <div className="w-12" />
       </div>
+
+      {plusCounts ? (
+        <p className="mt-2 text-center text-[11px] leading-snug text-arena-red">
+          DEV: «+» засчитывает отжимание — выключается в дев-панели
+        </p>
+      ) : (
+      <p className="mt-2 text-center text-[11px] leading-snug text-arena-text-dim">
+        <span className="font-semibold uppercase tracking-wider text-arena-amber">Кликер</span>{' '}
+        <span className="tabular-nums text-arena-text">{clickerTotal}</span>
+        {sessionTaps > 0 && <span className="tabular-nums"> (+{sessionTaps})</span>} · в зачёт идут
+        только отжимания с камеры
+      </p>
+      )}
     </div>
   );
 }
