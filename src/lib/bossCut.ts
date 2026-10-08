@@ -284,8 +284,12 @@ export function slowLineTimes(): number[] {
  * it being larger where the drop is.
  */
 export function nameNudge(wide: boolean): number {
-  return wide ? 36 : 24;
+  // On a phone the word stands straight (see WORD_TILT), so straight down is under it.
+  return wide ? 36 : 0;
 }
+
+/** How far the word, its line and the name lean back where they're set beside the picture. */
+export const WORD_TILT = -13;
 
 /**
  * Light pouring down from above, as if something overhead switched on.

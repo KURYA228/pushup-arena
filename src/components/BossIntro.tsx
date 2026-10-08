@@ -26,6 +26,7 @@ import {
   impactTimes,
   joltTimes,
   nameNudge,
+  WORD_TILT,
   restingAt,
   slideFrom,
   slideTimes,
@@ -141,6 +142,9 @@ export function BossIntro({
         };
   // One moment, two directions: they are thrown from opposite sides and meet in the middle.
   const word = enter(ENTER_AT, 'left');
+  // The word, its line and the name lean back where they stand beside the picture. Stacked
+  // over it on a phone they stand straight — tipped, the title over the boss read as askew.
+  const tilt = wide ? WORD_TILT : 0;
   const figure = enter(ENTER_AT, 'right');
   // The name is thrown in with them, from the word's side. It used to fade up on the spot
   // a quarter of a second behind, which next to two things slamming in read as a caption
@@ -291,8 +295,11 @@ export function BossIntro({
           {/* The word and the slow line share a slot, so the line can start exactly where
               the word starts instead of at some share of the screen that happens to look
               right at one size. The slot itself never moves — the slide lives on the word,
-              and a line that flew in with it would not be a slow line. */}
-          <div className="shrink-0 self-start md:self-auto">
+              and a line that flew in with it would not be a slow line.
+
+              On a phone the slot is centred over the picture. Pinned to the left edge, the
+              word read as something off to the side rather than the title over the boss. */}
+          <div className="shrink-0 self-center md:self-auto">
             <div className="relative">
               <motion.p
                 // Tipped back to the left, so it reads as stamped onto the screen rather than
@@ -302,7 +309,7 @@ export function BossIntro({
                 // be slid across them. `color: transparent` is what lets the fill show through
                 // the glyphs; the drop-shadow below still reads the shape, so the glow survives.
                 style={{
-                  rotate: -13,
+                  rotate: tilt,
                   backgroundImage:
                     'linear-gradient(100deg, #e03030 0%, #ef4444 32%, #ffe3e3 48%, #ff8a8a 56%, #ef4444 72%, #e03030 100%)',
                   backgroundSize: '240% 100%',
@@ -348,7 +355,7 @@ export function BossIntro({
                   top: '100%',
                   width: '105%',
                   height: 6,
-                  rotate: -13,
+                  rotate: tilt,
                   background:
                     'linear-gradient(90deg, #ef4444 0%, #ffc2c2 46%, #ef4444 74%, transparent 100%)',
                   clipPath: NEEDLE,
@@ -374,7 +381,7 @@ export function BossIntro({
                 // Tilted to match the word, and turned about its own middle like the word
                 // is. Hinged on the left end instead, the rotation drags the centred text a
                 // few pixels left of the word's centre, and lifts it by nearly fifty.
-                style={{ rotate: -13 }}
+                style={{ rotate: tilt }}
                 initial={name.initial}
                 animate={name.animate}
                 transition={name.transition}

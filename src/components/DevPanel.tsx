@@ -9,6 +9,7 @@ import { totalXpForLevel } from '../data/leveling';
 import { BossIcon } from './BossIcon';
 import { MAX_FREEZES, freezesOf, todayLocal } from '../lib/streak';
 import { setPlusCountsReps, usePlusCountsReps } from '../lib/devFlags';
+import { UPGRADES, upgradeLevel } from '../data/shop';
 import { forgetIntro } from '../lib/intro';
 
 /**
@@ -28,6 +29,12 @@ export function DevPanel({
   onClose: () => void;
 }) {
   const plusCounts = usePlusCountsReps();
+  const boughtLevels = UPGRADES.reduce((n, u) => n + upgradeLevel(profile.upgrades, u.id), 0);
+  /** What every bought level cost, for handing the XP back. */
+  const refund = UPGRADES.reduce(
+    (sum, u) => sum + u.costs.slice(0, upgradeLevel(profile.upgrades, u.id)).reduce((a, c) => a + c, 0),
+    0,
+  );
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -176,6 +183,19 @@ export function DevPanel({
             </Action>
             <Action onClick={() => void patch({ achievementsUnlocked: [] })}>Закрыть все</Action>
           </Row>
+        </Group>
+
+        <Group title={`Магазин — куплено уровней: ${boughtLevels}`}>
+          <Row>
+            <Action onClick={() => void patch({ upgrades: {} })}>Убрать покупки</Action>
+            <Action onClick={() => void patch({ upgrades: {}, totalXp: profile.totalXp + refund })}>
+              Убрать и вернуть {refund} XP
+            </Action>
+          </Row>
+          <p className="text-[10px] leading-snug text-arena-text-dim">
+            Сбрасывает улучшения. Заморозки стрика не трогает — купленные не отличить от
+            заработанных, их число правится в «Счётчиках».
+          </p>
         </Group>
 
         <Group title="Кнопка «+»">
