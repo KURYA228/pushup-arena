@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RepDetector, type PoseSample, type Strictness } from './repDetector.ts';
+import { RepDetector, cameraLooksHeadOn, type PoseSample, type Strictness } from './repDetector.ts';
 
 const FPS = 30;
 const DT = 1000 / FPS;
@@ -238,4 +238,103 @@ test('reset discards the learned range', () => {
   assert.equal(d.snapshot().calibrated, true);
   d.reset();
   assert.equal(d.snapshot().calibrated, false);
+});
+
+test('a head-on camera (small elbow swing) is recognised so the UI can say so', () => {
+  const d = new RepDetector();
+  // Seen from the front, a full push-up reads as a 20-odd degree swing.
+  const { counted } = simulate(d, { bottom: 130, top: 152, reps: 6 });
+  assert.equal(counted, 0, 'nothing countable at that range');
+  assert.equal(cameraLooksHeadOn(d.snapshot()), true);
+});
+
+test('a still body or a proper set does not trigger the head-on hint', () => {
+  const still = new RepDetector();
+  simulate(still, { bottom: 158, top: 162, reps: 4 });
+  assert.equal(cameraLooksHeadOn(still.snapshot()), false, 'resting at the top');
+
+  const good = new RepDetector();
+  simulate(good, { bottom: 95, top: 160, reps: 6 });
+  assert.equal(cameraLooksHeadOn(good.snapshot()), false, 'calibrated set');
+});
+
+/**
+ * Jabbing a hand at the camera and back while sitting in front of the phone. The elbow
+ * straightens and bends like a rep; the shoulder follows the arm forward and shifts on screen,
+ * while the hand — moving along the line of sight — barely moves in the picture. To the motion
+ * test alone that is exactly a push-up's signature (shoulder travels, hand stays), which is how
+ * these got counted. The torso is upright the whole time, and that's what gives it away.
+ */
+function reachSample(angle: number, depth: number, withPosture: boolean): PoseSample {
+  return {
+    angle,
+    shoulder: { x: 0.5 + 0.25 * depth, y: 0.4 + 0.05 * depth },
+    wrist: { x: 0.62 + 0.02 * depth, y: 0.5 },
+    scale: 1 - 0.5 * depth,
+    ...(withPosture ? { torsoTilt: 80 } : {}),
+  };
+}
+
+function reachReps(withPosture: boolean): number {
+  const d = new RepDetector();
+  let reps = 0;
+  for (let t = 0; t < 30_000; t += DT) {
+    const depth = 0.5 - 0.5 * Math.cos((2 * Math.PI * t) / 1500);
+    if (d.push(reachSample(170 - 80 * depth, depth, withPosture), t)) reps += 1;
+  }
+  return reps;
+}
+
+test('reaching toward the camera fools the motion test alone…', () => {
+  assert.ok(reachReps(false) > 0, 'without posture this is indistinguishable from a rep');
+});
+
+test('…and never counts once posture is known', () => {
+  assert.equal(reachReps(true), 0);
+});
+
+/** A push-up-shaped motion, with the torso at a given lean (or hips out of view). */
+function simulateTilt(d: RepDetector, reps: number, tilt: (t: number, depth: number) => number | null) {
+  let counted = 0;
+  const end = reps * 2000;
+  for (let t = 0; t < end; t += DT) {
+    const depth = 0.5 - 0.5 * Math.cos((2 * Math.PI * t) / 2000);
+    const s = sampleFor(160 - 60 * depth, depth, t, 'pushup', 0);
+    if (d.push({ ...s, torsoTilt: tilt(t, depth) }, t)) counted += 1;
+  }
+  return counted;
+}
+
+test('in a push-up position the reps count', () => {
+  assert.equal(simulateTilt(new RepDetector(), 8, () => 12), 8);
+});
+
+test('upright — sitting or standing — nothing counts, whatever the arms do', () => {
+  const d = new RepDetector();
+  assert.equal(simulateTilt(d, 8, () => 82), 0);
+  assert.equal(d.snapshot().posture, 'upright');
+});
+
+test('hips never visible: nothing counts, and the reason is reported', () => {
+  const d = new RepDetector();
+  assert.equal(simulateTilt(d, 6, () => null), 0);
+  assert.equal(d.snapshot().posture, 'unknown');
+});
+
+test('hips slipping out of view at the bottom of each rep does not break the count', () => {
+  const d = new RepDetector();
+  assert.equal(simulateTilt(d, 8, (_t, depth) => (depth > 0.7 ? null : 15)), 8);
+});
+
+test('standing up after a set ends counting at once', () => {
+  const d = new RepDetector();
+  const set = simulateTilt(d, 6, () => 10);
+  let after = 0;
+  // Right after the set, still inside the motion-engagement hold, now upright and waving.
+  for (let t = 12_000; t < 30_000; t += DT) {
+    const depth = 0.5 - 0.5 * Math.cos((2 * Math.PI * t) / 2000);
+    if (d.push({ ...sampleFor(160 - 60 * depth, depth, t, 'pushup', 0), torsoTilt: 80 }, t)) after += 1;
+  }
+  assert.equal(set, 6);
+  assert.equal(after, 0);
 });

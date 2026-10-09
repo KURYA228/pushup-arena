@@ -2,6 +2,16 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { readFileSync } from 'node:fs';
+
+// The MediaPipe engine (WASM) is fetched from a CDN at runtime and has to be the same release as
+// the JS package that drives it. Read from the installed package so the two can't drift apart —
+// a hard-coded version had already fallen two major releases behind.
+const mediapipeVersion = (
+  JSON.parse(readFileSync(new URL('./node_modules/@mediapipe/tasks-vision/package.json', import.meta.url), 'utf8')) as {
+    version: string;
+  }
+).version;
 
 // GitHub Pages serves the app from /<repo>/, not the domain root. Everything that emits an
 // absolute URL — the manifest, the service worker scope, asset links in index.html — has to be
@@ -12,6 +22,9 @@ const base = process.env.BASE_PATH ?? '/pushup-arena/';
 // https://vite.dev/config/
 export default defineConfig({
   base,
+  define: {
+    __MEDIAPIPE_VERSION__: JSON.stringify(mediapipeVersion),
+  },
   plugins: [
     react(),
     tailwindcss(),

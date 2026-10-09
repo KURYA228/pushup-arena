@@ -16,6 +16,11 @@
  *    exactly the same angle trace as a rep. What separates them is what the rest of the body does:
  *    in a push-up your hands are planted and your torso travels; in an arm gesture your shoulder
  *    is anchored and your wrist travels. So counting is gated on that motion signature.
+ *
+ * 3. And on posture. In a push-up the torso is close to horizontal — shoulders and hips at
+ *    nearly the same height. Sitting or standing in front of the phone it's upright, and no
+ *    amount of arm movement there is a push-up. That one test shuts out the whole family of
+ *    "jab the hand at the camera" false counts the motion test alone let through.
  */
 
 /** Landmark indices in the MediaPipe Pose topology. */
@@ -44,7 +49,17 @@ export interface PoseSample {
   wrist: Vec2;
   /** Body reference length (torso or upper arm) in the same units — makes travel distance-free. */
   scale: number;
+  /**
+   * How far the torso (shoulders → hips) leans from horizontal, in degrees, from the 3D world
+   * landmarks: about 0–30 in a push-up, about 70–90 sitting or standing. `null` when the hips
+   * aren't visible, so posture can't be judged. Left out entirely, the posture gate is off —
+   * which only the unit tests rely on.
+   */
+  torsoTilt?: number | null;
 }
+
+/** What the body is doing, as far as counting is concerned. */
+export type Posture = 'ok' | 'upright' | 'unknown';
 
 /** Angle ABC in degrees, computed in 3D so it doesn't depend on camera placement or frame aspect. */
 export function angleAt(a: Point3, b: Point3, c: Point3): number | null {
@@ -113,6 +128,12 @@ export interface DetectorTuning {
   engagementHoldMs: number;
   /** How fast a fresh range estimate replaces the stored one. */
   rangeBlend: number;
+  /** Torso lean (degrees from horizontal) above which it's not a push-up. */
+  maxTorsoTiltDeg: number;
+  /** Smoothing on the torso lean, so one bad frame can't flip the verdict. */
+  tiltAlpha: number;
+  /** A good posture verdict survives the hips flickering out of view this long. */
+  postureHoldMs: number;
 }
 
 /** Samples kept while disengaged, ready to be admitted when movement is recognised. */
@@ -136,6 +157,9 @@ export const DEFAULT_TUNING: DetectorTuning = {
   bodyOverArmRatio: 1.15,
   engagementHoldMs: 2500,
   rangeBlend: 0.5,
+  maxTorsoTiltDeg: 50,
+  tiltAlpha: 0.3,
+  postureHoldMs: 1000,
 };
 
 export interface DetectorSnapshot {
@@ -154,7 +178,28 @@ export interface DetectorSnapshot {
   downAtDepth: number;
   /** False when only your arm is moving — the signature of a gesture rather than a push-up. */
   bodyEngaged: boolean;
+  /** Whether the body is in a push-up position; reps only count while it's `ok`. */
+  posture: Posture;
+  /**
+   * How far the elbow angle has actually been swinging over the last few seconds, engaged or
+   * not (5th–95th percentile, degrees). Feeds the "move the phone" hint: movement that never
+   * reaches the minimum range is what a push-up looks like from the front.
+   */
+  observedSpread: number;
   reps: number;
+}
+
+/** Window for {@link DetectorSnapshot.observedSpread}. */
+const SPREAD_WINDOW_MS = 6000;
+
+/**
+ * True when someone is clearly moving but the elbow barely appears to bend — the signature of a
+ * camera in front of you instead of beside you. Seen head-on, the elbow folds along the line of
+ * sight, the measured angle swings only 15–25° even on a full push-up, and the counter, which
+ * needs a 30° range to learn from, waits forever with nothing to tell you why.
+ */
+export function cameraLooksHeadOn(s: DetectorSnapshot, tuning: DetectorTuning = DEFAULT_TUNING): boolean {
+  return !s.calibrated && s.observedSpread >= 12 && s.observedSpread < tuning.minRomDeg + 5;
 }
 
 interface MotionPoint {
@@ -163,6 +208,7 @@ interface MotionPoint {
   sy: number;
   wx: number;
   wy: number;
+  scale: number;
 }
 
 export class RepDetector {
@@ -174,11 +220,17 @@ export class RepDetector {
   private pending: { t: number; v: number }[] = [];
   private medianBuf: number[] = [];
   private smoothed: number | null = null;
+  /** Every smoothed angle of the last few seconds, engaged or not — see `observedSpread`. */
+  private recent: { t: number; v: number }[] = [];
 
   private motion: MotionPoint[] = [];
   private lastBodyMotionAt: number | null = null;
   private engaged = false;
   private wasEngaged = false;
+
+  private tilt: number | null = null;
+  private posture: Posture = 'unknown';
+  private postureOkAt: number | null = null;
 
   private bottom: number | null = null;
   private top: number | null = null;
@@ -206,10 +258,14 @@ export class RepDetector {
     this.pending = [];
     this.medianBuf = [];
     this.smoothed = null;
+    this.recent = [];
     this.motion = [];
     this.lastBodyMotionAt = null;
     this.engaged = false;
     this.wasEngaged = false;
+    this.tilt = null;
+    this.posture = 'unknown';
+    this.postureOkAt = null;
     this.bottom = null;
     this.top = null;
     this.phase = 'up';
@@ -241,7 +297,12 @@ export class RepDetector {
     this.lastSampleAt = t;
 
     const a = this.smooth(s.angle);
-    this.engaged = this.updateEngagement(s, t);
+    this.posture = this.updatePosture(s.torsoTilt, t);
+    // Both have to hold: the torso swinging the way a push-up swings it, and the body in a
+    // push-up position. Either alone is fooled by something; together they aren't.
+    this.engaged = this.updateEngagement(s, t) && this.posture === 'ok';
+    this.recent.push({ t, v: a });
+    while (this.recent.length && t - this.recent[0].t > SPREAD_WINDOW_MS) this.recent.shift();
 
     // Let the median/EMA filter fill before the sample is trusted anywhere. A garbage frame
     // arriving first would otherwise be recorded as a genuine angle, and the range estimator
@@ -332,8 +393,16 @@ export class RepDetector {
       // In fallback mode the depth scale already ends exactly at the down threshold.
       downAtDepth: calibrated ? 1 - DOWN_FRAC[this.strictness] : 1,
       bodyEngaged: this.engaged,
+      posture: this.posture,
+      observedSpread: this.observedSpread(),
       reps: this.repCount,
     };
+  }
+
+  private observedSpread(): number {
+    if (this.recent.length < 15) return 0;
+    const vals = this.recent.map((p) => p.v).sort((x, y) => x - y);
+    return Math.round(vals[Math.floor(vals.length * 0.95)] - vals[Math.floor(vals.length * 0.05)]);
   }
 
   /**
@@ -347,20 +416,19 @@ export class RepDetector {
    */
   private updateEngagement(s: PoseSample, t: number): boolean {
     if (s.scale > 1e-4) {
-      this.motion.push({
-        t,
-        sx: s.shoulder.x / s.scale,
-        sy: s.shoulder.y / s.scale,
-        wx: s.wrist.x / s.scale,
-        wy: s.wrist.y / s.scale,
-      });
+      // Raw positions, normalised once by the window's largest scale below. Dividing each
+      // sample by its own scale looked tidy and was a trap: point your arm at the camera and its
+      // on-screen length collapses, so a shoulder that never moved "travelled" across the frame
+      // in normalised units — and the gesture passed for a push-up.
+      this.motion.push({ t, sx: s.shoulder.x, sy: s.shoulder.y, wx: s.wrist.x, wy: s.wrist.y, scale: s.scale });
       let cut = 0;
       while (cut < this.motion.length && t - this.motion[cut].t > this.tuning.motionWindowMs) cut += 1;
       if (cut > 0) this.motion = this.motion.slice(cut);
 
       if (this.motion.length >= 3) {
-        const shoulderTravel = spread(this.motion, (p) => p.sx, (p) => p.sy);
-        const wristTravel = spread(this.motion, (p) => p.wx, (p) => p.wy);
+        const ref = this.motion.reduce((m, p) => Math.max(m, p.scale), 0);
+        const shoulderTravel = spread(this.motion, (p) => p.sx, (p) => p.sy) / ref;
+        const wristTravel = spread(this.motion, (p) => p.wx, (p) => p.wy) / ref;
         if (
           shoulderTravel >= this.tuning.minBodyTravel &&
           shoulderTravel > wristTravel * this.tuning.bodyOverArmRatio
@@ -371,6 +439,25 @@ export class RepDetector {
     }
 
     return this.lastBodyMotionAt != null && t - this.lastBodyMotionAt <= this.tuning.engagementHoldMs;
+  }
+
+  /**
+   * Is the body in a push-up position? The torso's lean is smoothed so a single bad frame
+   * can't flip it; a good verdict outlives a short loss of the hips (they slip out of frame at
+   * the bottom of a rep), but an upright reading ends it at once.
+   */
+  private updatePosture(tilt: number | null | undefined, t: number): Posture {
+    if (tilt === undefined) return 'ok'; // gate off — see PoseSample.torsoTilt
+    if (tilt === null) {
+      if (this.postureOkAt != null && t - this.postureOkAt <= this.tuning.postureHoldMs) return 'ok';
+      return 'unknown';
+    }
+    this.tilt = this.tilt == null ? tilt : this.tilt + this.tuning.tiltAlpha * (tilt - this.tilt);
+    if (this.tilt <= this.tuning.maxTorsoTiltDeg) {
+      this.postureOkAt = t;
+      return 'ok';
+    }
+    return 'upright';
   }
 
   private smooth(raw: number): number {

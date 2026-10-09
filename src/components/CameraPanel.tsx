@@ -7,6 +7,8 @@ import {
   Camera,
   Hand,
   Loader2,
+  Maximize2,
+  Minimize2,
   Minus,
   Plus,
   RotateCcw,
@@ -17,13 +19,26 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { usePoseDetection, type ModelQuality } from '../hooks/usePoseDetection';
-import type { Strictness } from '../lib/repDetector';
+import { cameraLooksHeadOn, type Strictness } from '../lib/repDetector';
 import type { Feedback } from '../hooks/useFeedback';
 import { bumpClicker } from '../hooks/useProfile';
 import { usePlusCountsReps } from '../lib/devFlags';
+import { PushupGuy } from './PushupGuy';
 import { db, PROFILE_ID } from '../db/db';
 
 type Mode = 'manual' | 'camera';
+
+const MODE_KEY = 'arena.counterMode';
+
+/** What the understudy says on a counted rep — one per rep, round and round. */
+const QUIPS = ['уф!', 'ещё!', 'красава', 'босс плачет', 'мощь', 'не сдавайся', 'легенда', 'пол дрожит', 'ага!', 'жми!'];
+function readMode(): Mode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'camera' ? 'camera' : 'manual';
+  } catch {
+    return 'manual';
+  }
+}
 
 const STRICTNESS_LABELS: { id: Strictness; label: string }[] = [
   { id: 'soft', label: 'Мягко' },
@@ -77,8 +92,20 @@ export function CameraPanel({
   feedback: Feedback;
   disabled?: boolean;
 }) {
-  const [mode, setMode] = useState<Mode>('manual');
+  // Remembered across screens and sessions: someone who counts with the camera shouldn't have to
+  // switch it back on for every fight and every Rush.
+  const [mode, setModeState] = useState<Mode>(readMode);
+  const setMode = (m: Mode) => {
+    setModeState(m);
+    try {
+      localStorage.setItem(MODE_KEY, m);
+    } catch {
+      // No storage — it just won't be remembered.
+    }
+  };
   const [showSettings, setShowSettings] = useState(false);
+  /** The camera thumbnail blown up to full width — for setting the phone down, not for the set. */
+  const [bigPreview, setBigPreview] = useState(false);
   /** Dev switch: «+» lands a real rep instead of a clicker tap. */
   const plusCounts = usePlusCountsReps();
   /** Taps made on this screen, so «−» in manual mode can take back exactly those and no more. */
@@ -125,6 +152,8 @@ export function CameraPanel({
   }, [mode, start, stop]);
 
   const isBusy = pose.status === 'requesting-permission' || pose.status === 'loading-model';
+  /** Someone in view, in a push-up position — the understudy copies them; otherwise he sleeps. */
+  const following = pose.status === 'tracking' && pose.quality === 'ok' && pose.snapshot.posture === 'ok';
   const { snapshot } = pose;
 
   // One line telling the user why reps aren't registering — the previous version showed nothing,
@@ -133,6 +162,15 @@ export function CameraPanel({
   if (pose.status === 'tracking') {
     if (pose.quality === 'no-pose') hint = { text: 'Не вижу тебя — попади целиком в кадр', tone: 'warn' };
     else if (pose.quality === 'arm-hidden') hint = { text: 'Не видно рук — разверни камеру вбок', tone: 'warn' };
+    // Posture first: if it isn't a push-up position, nothing else on this list matters.
+    else if (snapshot.posture === 'unknown')
+      hint = { text: 'Не видно корпуса — отодвинь телефон, чтобы в кадре были плечи и бёдра', tone: 'warn' };
+    else if (snapshot.posture === 'upright')
+      hint = { text: 'Прими упор лёжа — стоя и сидя повторы не считаются', tone: 'info' };
+    // Checked before "waiting for the body": from the front a real push-up fails both tests,
+    // and only this one tells you what to actually change.
+    else if (cameraLooksHeadOn(snapshot))
+      hint = { text: 'Сгиб локтей почти не виден — поставь телефон сбоку от себя, на уровне пола', tone: 'warn' };
     else if (!snapshot.bodyEngaged)
       hint = { text: 'Жду движения корпуса — движения одной рукой не считаются', tone: 'info' };
     else if (!snapshot.calibrated)
@@ -164,28 +202,49 @@ export function CameraPanel({
 
       {mode === 'camera' && (
         <div className="mb-3">
-          {/* The container follows the stream's own aspect ratio so the skeleton overlay lines up
-              with the video instead of being stretched against a fixed 3:4 box. */}
+          {/*
+            Compact by default: a thumbnail with the skeleton and the depth gauge, and the hint and
+            controls beside it. Mid-set the boss is what you want to see — the full-size preview
+            used to push him off the screen. Tap the thumbnail to blow it up while you set the
+            phone down, tap again to shrink it. The same <video> both ways, so the stream is
+            never interrupted by the switch.
+          */}
           <div
-            style={{ aspectRatio: String(pose.aspect) }}
-            className="relative mx-auto w-full max-w-xs overflow-hidden rounded-2xl border border-arena-border bg-black md:max-w-md xl:max-w-lg"
+            className={clsx(
+              'flex gap-3 rounded-2xl border border-arena-border bg-arena-surface p-2',
+              bigPreview ? 'flex-col items-center' : 'items-stretch',
+            )}
           >
-            <video
-              ref={pose.videoRef}
-              playsInline
-              muted
-              className={clsx('h-full w-full object-cover', pose.mirrored && '-scale-x-100')}
-            />
-            <canvas
-              ref={pose.canvasRef}
-              className={clsx('absolute inset-0 h-full w-full', pose.mirrored && '-scale-x-100')}
-            />
+            <button
+              type="button"
+              onClick={() => setBigPreview((b) => !b)}
+              aria-label={bigPreview ? 'Уменьшить камеру' : 'Увеличить камеру, чтобы выставить кадр'}
+              style={{ aspectRatio: String(pose.aspect) }}
+              className={clsx(
+                'relative shrink-0 overflow-hidden rounded-xl bg-black',
+                bigPreview ? 'w-full max-w-xs md:max-w-md' : 'w-24',
+              )}
+            >
+              <video
+                ref={pose.videoRef}
+                playsInline
+                muted
+                className={clsx('h-full w-full object-cover', pose.mirrored && '-scale-x-100')}
+              />
+              <canvas
+                ref={pose.canvasRef}
+                className={clsx('absolute inset-0 h-full w-full', pose.mirrored && '-scale-x-100')}
+              />
 
-            {pose.status === 'tracking' && (
-              <>
-                {/* Vertical depth gauge: fills as you descend, with a marker at the depth that
-                    actually closes a rep. Makes "not deep enough" visible instead of silent. */}
-                <div className="absolute bottom-3 left-3 top-3 w-2 overflow-hidden rounded-full bg-black/50">
+              {pose.status === 'tracking' && (
+                // Vertical depth gauge: fills as you descend, with a marker at the depth that
+                // actually closes a rep. Makes "not deep enough" visible instead of silent.
+                <div
+                  className={clsx(
+                    'absolute left-1.5 overflow-hidden rounded-full bg-black/50',
+                    bigPreview ? 'bottom-3 top-3 w-2' : 'bottom-1.5 top-1.5 w-1.5',
+                  )}
+                >
                   <div
                     className={clsx(
                       'absolute inset-x-0 bottom-0 rounded-full transition-[height] duration-75',
@@ -193,72 +252,116 @@ export function CameraPanel({
                     )}
                     style={{ height: `${snapshot.depth * 100}%` }}
                   />
-                  <div
-                    className="absolute inset-x-0 h-px bg-arena-red"
-                    style={{ bottom: `${snapshot.downAtDepth * 100}%` }}
-                  />
+                  <div className="absolute inset-x-0 h-px bg-arena-red" style={{ bottom: `${snapshot.downAtDepth * 100}%` }} />
                 </div>
-
-                <div className="absolute bottom-2 right-2 flex flex-col items-end gap-1 text-[10px] tabular-nums text-arena-text-dim">
-                  <span className="rounded-md bg-black/60 px-2 py-1">
-                    {snapshot.angle != null ? `${snapshot.angle}°` : '—'}
-                    {snapshot.rom != null && ` · размах ${snapshot.rom}°`}
-                  </span>
-                  <span className="rounded-md bg-black/60 px-2 py-1">{pose.fps} fps</span>
-                </div>
-
-                <button
-                  onClick={pose.flipCamera}
-                  aria-label="Переключить камеру"
-                  className="absolute right-2 top-2 rounded-full bg-black/60 p-2 text-arena-text active:scale-95"
-                >
-                  <SwitchCamera size={16} />
-                </button>
-              </>
-            )}
-
-            {isBusy && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 text-sm text-arena-text-dim">
-                <Loader2 className="animate-spin" size={22} />
-                {pose.status === 'requesting-permission' ? 'Запрашиваем доступ к камере…' : 'Загружаем модель…'}
-              </div>
-            )}
-            {pose.status === 'error' && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/85 px-4 text-center text-sm text-arena-red">
-                <AlertTriangle size={22} />
-                {pose.error}
-              </div>
-            )}
-          </div>
-
-          {hint && (
-            <p
-              className={clsx(
-                'mt-2 text-center text-xs',
-                hint.tone === 'warn' ? 'text-arena-red' : 'text-arena-text-dim',
               )}
-            >
-              {hint.text}
-            </p>
-          )}
 
-          <div className="mt-2 flex justify-center gap-2">
-            {pose.status === 'error' ? (
-              <button
-                onClick={() => void pose.start()}
-                className="rounded-lg bg-arena-surface-2 px-3 py-1.5 text-xs font-medium text-arena-text"
+              {isBusy && (
+                <span className="absolute inset-0 flex items-center justify-center bg-black/70 text-arena-text-dim">
+                  <Loader2 className="animate-spin" size={bigPreview ? 22 : 16} />
+                </span>
+              )}
+              {pose.status === 'error' && (
+                <span className="absolute inset-0 flex items-center justify-center bg-black/85 text-arena-red">
+                  <AlertTriangle size={bigPreview ? 22 : 16} />
+                </span>
+              )}
+
+            </button>
+
+            <div className={clsx('flex min-w-0 flex-1 flex-col justify-between gap-1.5', bigPreview && 'w-full')}>
+              {/* What's going on, in one line: loading, an error, or why reps aren't counting. */}
+              <p
+                className={clsx(
+                  'text-xs leading-snug',
+                  pose.status === 'error' || hint?.tone === 'warn' ? 'text-arena-red' : 'text-arena-text-dim',
+                  bigPreview && 'text-center',
+                )}
               >
-                Повторить попытку
-              </button>
-            ) : (
-              <button
-                onClick={pose.recalibrate}
-                disabled={pose.status !== 'tracking'}
-                className="flex items-center gap-1.5 rounded-lg bg-arena-surface-2 px-3 py-1.5 text-xs font-medium text-arena-text disabled:opacity-40"
-              >
-                <RotateCcw size={13} /> Перекалибровать
-              </button>
-            )}
+                {pose.status === 'requesting-permission'
+                  ? 'Запрашиваем доступ к камере…'
+                  : pose.status === 'loading-model'
+                    ? 'Загружаем распознавание…'
+                    : pose.status === 'error'
+                      ? pose.error
+                      : (hint?.text ?? 'Считаю отжимания — каждый повтор бьёт по врагу')}
+              </p>
+
+              {pose.status === 'tracking' && (
+                <>
+                  <p className={clsx('text-[10px] tabular-nums text-arena-text-dim', bigPreview && 'text-center')}>
+                    {snapshot.angle != null ? `${snapshot.angle}°` : '—'}
+                    {snapshot.rom != null && ` · размах ${snapshot.rom}°`} · {pose.fps} fps
+                  </p>
+                  {/* The understudy: a little legionary who copies you — down when you go down,
+                      a bounce and a quip on every counted rep, asleep while there's nobody to
+                      copy. Fills the empty corner, and it's a second way to see the camera
+                      really is following you. Centred in the column rather than pushed to its
+                      edge, so his Zs have room to rise. */}
+                  {!bigPreview && (
+                    <div className="flex justify-end pr-6">
+                      <PushupGuy
+                        className="-my-2 h-[80px] w-[188px]"
+                        bare
+                        mode={following ? 'follow' : 'sleep'}
+                        depth={snapshot.depth}
+                        repKey={snapshot.reps}
+                        quip={QUIPS[snapshot.reps % QUIPS.length]}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className={clsx('flex flex-wrap gap-1.5', bigPreview && 'justify-center')}>
+                {pose.status === 'error' ? (
+                  <button
+                    onClick={() => void pose.start()}
+                    className="rounded-lg bg-arena-surface-2 px-2.5 py-1 text-[11px] font-medium text-arena-text"
+                  >
+                    Повторить попытку
+                  </button>
+                ) : (
+                  <>
+                    {/* «−1» lives here in camera mode, so the whole counter fits beside the boss
+                        instead of a button row below the fold. */}
+                    <button
+                      onClick={takeBack}
+                      disabled={disabled || !canTakeBack}
+                      aria-label="Убрать одно повторение"
+                      className="flex items-center gap-1 rounded-lg bg-arena-surface-2 px-2.5 py-1 text-[11px] font-medium text-arena-text disabled:opacity-40"
+                    >
+                      <Minus size={12} /> 1
+                    </button>
+                    {/* Spelled out as its own button beside the picture, rather than a label on
+                        it — a caption over the video read as part of the video. The thumbnail
+                        itself still toggles too. */}
+                    <button
+                      onClick={() => setBigPreview((b) => !b)}
+                      className="flex items-center gap-1 rounded-lg bg-arena-surface-2 px-2.5 py-1 text-[11px] font-medium text-arena-text"
+                    >
+                      {bigPreview ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                      {bigPreview ? 'Свернуть' : 'Крупнее'}
+                    </button>
+                    <button
+                      onClick={pose.recalibrate}
+                      disabled={pose.status !== 'tracking'}
+                      className="flex items-center gap-1 rounded-lg bg-arena-surface-2 px-2.5 py-1 text-[11px] font-medium text-arena-text disabled:opacity-40"
+                    >
+                      <RotateCcw size={12} /> Калибровка
+                    </button>
+                    <button
+                      onClick={pose.flipCamera}
+                      disabled={pose.status !== 'tracking'}
+                      aria-label="Переключить камеру"
+                      className="flex items-center gap-1 rounded-lg bg-arena-surface-2 px-2.5 py-1 text-[11px] font-medium text-arena-text disabled:opacity-40"
+                    >
+                      <SwitchCamera size={12} /> Камера
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -320,6 +423,10 @@ export function CameraPanel({
         </div>
       )}
 
+      {/* The −/+ row is manual mode only. With the camera on there's no "+": the camera is the
+          count, and a button beside it only invites tapping instead of pushing. Its «−1» moves
+          into the camera strip above. */}
+      {mode === 'manual' && (
       <div className="relative flex items-center justify-center gap-4">
         <button
           onClick={takeBack}
@@ -340,8 +447,9 @@ export function CameraPanel({
         </motion.button>
         <div className="w-12" />
       </div>
+      )}
 
-      {plusCounts ? (
+      {mode === 'camera' ? null : plusCounts ? (
         <p className="mt-2 text-center text-[11px] leading-snug text-arena-red">
           DEV: «+» засчитывает отжимание — выключается в дев-панели
         </p>

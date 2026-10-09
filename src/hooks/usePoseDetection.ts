@@ -24,8 +24,23 @@ function loadVisionModule(): Promise<VisionModule> {
 }
 
 // MediaPipe assets are fetched from CDN/Google storage at runtime (not bundled — see README
-// for how to self-host them under public/mediapipe for full offline support).
-const WASM_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
+// for how to self-host them under public/mediapipe for full offline support). The engine's
+// version comes from the installed package (vite.config.ts): the JS and the WASM it loads have to
+// be the same release, and a hard-coded one had drifted two majors behind.
+const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${__MEDIAPIPE_VERSION__}/wasm`;
+
+/**
+ * How long the first load (engine + model, ~15MB) may take before we call it failed. Generous —
+ * a slow phone network is the normal case on first use — but finite: a stalled download used to
+ * leave "Загружаем модель…" on screen forever.
+ */
+const MODEL_TIMEOUT_MS = 60_000;
+/** No new video frame for this long while tracking: nudge the video back into playing. */
+const STALL_NUDGE_MS = 2500;
+/** Still nothing after this long: tear the camera down and open it again. */
+const STALL_RESTART_MS = 6000;
+/** This many failed inferences in a row means the engine itself is broken, not one bad frame. */
+const MAX_FRAME_ERRORS = 20;
 
 /** `full` tracks limbs noticeably better under the foreshortening a push-up produces; `lite` is ~2x faster. */
 export type ModelQuality = 'lite' | 'full';
@@ -48,6 +63,41 @@ export type TrackingQuality = 'ok' | 'no-pose' | 'arm-hidden';
 
 /** Both joints of an arm must be at least this confident before we trust its angle. */
 const MIN_VISIBILITY = 0.5;
+/**
+ * Hips only have to be this visible to judge posture. Lower than for the arm: their position
+ * matters roughly (is the torso flat or upright?), and at floor level in side view they're often
+ * half-hidden behind the near leg.
+ */
+const MIN_HIP_VISIBILITY = 0.3;
+const SHOULDERS = [11, 12] as const;
+const HIPS = [23, 24] as const;
+
+/**
+ * Torso lean from horizontal, in degrees, from the metric 3D landmarks: the midpoint of the
+ * visible shoulders to the midpoint of the visible hips. World axes follow the camera, and a
+ * phone stood up on the floor has its "down" along gravity, so in a push-up this is small and
+ * sitting or standing it's near 90. `null` when no hip is visible enough to say.
+ */
+function torsoTilt(world: Landmark[], screen: NormalizedLandmark[]): number | null {
+  const mid = (idx: readonly number[], min: number) => {
+    const seen = idx.filter((i) => visibility(screen[i]) >= min && world[i]);
+    if (!seen.length) return null;
+    return {
+      x: seen.reduce((a, i) => a + world[i].x, 0) / seen.length,
+      y: seen.reduce((a, i) => a + world[i].y, 0) / seen.length,
+      z: seen.reduce((a, i) => a + world[i].z, 0) / seen.length,
+    };
+  };
+  const sh = mid(SHOULDERS, MIN_VISIBILITY);
+  const hip = mid(HIPS, MIN_HIP_VISIBILITY);
+  if (!sh || !hip) return null;
+  const dx = hip.x - sh.x;
+  const dy = hip.y - sh.y;
+  const dz = hip.z - sh.z;
+  const flat = Math.hypot(dx, dz);
+  if (flat === 0 && dy === 0) return null;
+  return (Math.atan2(Math.abs(dy), flat) * 180) / Math.PI;
+}
 /** Cap inference at ~33 fps. Cameras deliver 30, so anything above this is wasted battery. */
 const MIN_FRAME_INTERVAL_MS = 30;
 
@@ -79,11 +129,35 @@ function savePrefs(p: Prefs) {
   }
 }
 
-// One landmarker per model quality, shared across mounts so switching views doesn't re-download.
-const landmarkerCache = new Map<ModelQuality, Promise<PoseLandmarkerT>>();
+/** Rejects if `p` hasn't settled in `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number, error: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const id = window.setTimeout(() => reject(new Error(error)), ms);
+    p.then(
+      (v) => {
+        window.clearTimeout(id);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(id);
+        reject(e);
+      },
+    );
+  });
+}
+
+// One landmarker per model quality (and delegate), shared across mounts so switching views
+// doesn't re-download.
+const landmarkerCache = new Map<string, Promise<PoseLandmarkerT>>();
+/**
+ * Set once the GPU path has failed at runtime on this device. Some phones create the GPU
+ * delegate fine and then lose the context mid-session; after that, only the CPU is trusted.
+ */
+let gpuBroken = false;
 
 function getLandmarker(quality: ModelQuality): Promise<PoseLandmarkerT> {
-  const cached = landmarkerCache.get(quality);
+  const key = `${quality}|${gpuBroken ? 'cpu' : 'gpu'}`;
+  const cached = landmarkerCache.get(key);
   if (cached) return cached;
 
   const created = loadVisionModule().then(async ({ FilesetResolver, PoseLandmarker }) => {
@@ -98,6 +172,12 @@ function getLandmarker(quality: ModelQuality): Promise<PoseLandmarkerT> {
       minPosePresenceConfidence: 0.6,
       minTrackingConfidence: 0.6,
     };
+    if (gpuBroken) {
+      return PoseLandmarker.createFromOptions(vision, {
+        ...options,
+        baseOptions: { ...options.baseOptions, delegate: 'CPU' as const },
+      });
+    }
     try {
       return await PoseLandmarker.createFromOptions(vision, options);
     } catch {
@@ -109,10 +189,11 @@ function getLandmarker(quality: ModelQuality): Promise<PoseLandmarkerT> {
     }
   });
 
+  const bounded = withTimeout(created, MODEL_TIMEOUT_MS, 'model-timeout');
   // Don't cache a rejected load, or a transient network failure would poison every later attempt.
-  created.catch(() => landmarkerCache.delete(quality));
-  landmarkerCache.set(quality, created);
-  return created;
+  bounded.catch(() => landmarkerCache.delete(key));
+  landmarkerCache.set(key, bounded);
+  return bounded;
 }
 
 const visibility = (l: NormalizedLandmark | undefined) => l?.visibility ?? 0;
@@ -160,7 +241,7 @@ function extractSample(world: Landmark[], screen: NormalizedLandmark[], aspect: 
     scale = Math.max(scale, Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y));
   }
 
-  return { angle: angleSum / arms, shoulder, wrist, scale };
+  return { angle: angleSum / arms, shoulder, wrist, scale, torsoTilt: torsoTilt(world, screen) };
 }
 
 /**
@@ -187,6 +268,11 @@ export function usePoseDetection(onRep: () => void) {
 
   const lastVideoTimeRef = useRef(-1);
   const lastFrameAtRef = useRef(0);
+  /** When the video last produced a frame we hadn't seen — the stall watchdog reads it. */
+  const lastNewFrameAtRef = useRef(0);
+  const frameErrorsRef = useRef(0);
+  /** Reopens the camera from scratch; set once `open` exists. */
+  const restartRef = useRef<() => void>(() => {});
   const fpsCounterRef = useRef({ frames: 0, since: 0 });
 
   const onRepRef = useRef(onRep);
@@ -200,6 +286,8 @@ export function usePoseDetection(onRep: () => void) {
   if (!detectorRef.current) detectorRef.current = new RepDetector(prefs.strictness);
 
   const [status, setStatus] = useState<PoseStatus>('idle');
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const [error, setError] = useState<string | null>(null);
   const [quality, setQuality] = useState<TrackingQuality>('no-pose');
   const [fps, setFps] = useState(0);
@@ -250,6 +338,11 @@ export function usePoseDetection(onRep: () => void) {
 
     try {
       setStatus('requesting-permission');
+      // In-app browsers (Telegram, Instagram, VK) and pages opened over plain http have no
+      // camera API at all. Name that, instead of failing on an undefined.
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw Object.assign(new Error('no-camera-api'), { name: 'NoCameraApi' });
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: prefsRef.current.facing,
@@ -264,6 +357,13 @@ export function usePoseDetection(onRep: () => void) {
         return;
       }
       streamRef.current = stream;
+      // The camera can be taken away mid-session — a call, another app grabbing it, the OS
+      // reclaiming it in the background. Reopen rather than sit on a dead stream.
+      stream.getVideoTracks().forEach((track) =>
+        track.addEventListener('ended', () => {
+          if (alive()) restartRef.current();
+        }),
+      );
       const video = videoRef.current;
       if (!video) throw new Error('no-video-element');
       video.srcObject = stream;
@@ -281,6 +381,8 @@ export function usePoseDetection(onRep: () => void) {
 
       detectorRef.current?.markPoseLost();
       lastVideoTimeRef.current = -1;
+      lastNewFrameAtRef.current = performance.now();
+      frameErrorsRef.current = 0;
       fpsCounterRef.current = { frames: 0, since: performance.now() };
       setStatus('tracking');
 
@@ -296,7 +398,19 @@ export function usePoseDetection(onRep: () => void) {
         const now = performance.now();
         // The camera runs at ~30fps while rAF fires at 60–120Hz. Re-running inference on a frame
         // we already processed wastes battery and perturbs MediaPipe's internal temporal tracker.
-        if (v.currentTime === lastVideoTimeRef.current) return;
+        if (v.currentTime === lastVideoTimeRef.current) {
+          // No new frame. Briefly that's normal; for seconds it means the video has stalled —
+          // iOS pauses it on its own after an interruption — and the counter would sit there
+          // looking alive while counting nothing.
+          const stalled = now - lastNewFrameAtRef.current;
+          if (stalled > STALL_RESTART_MS) {
+            restartRef.current();
+          } else if (stalled > STALL_NUDGE_MS && v.paused) {
+            void v.play().catch(() => {});
+          }
+          return;
+        }
+        lastNewFrameAtRef.current = now;
         if (now - lastFrameAtRef.current < MIN_FRAME_INTERVAL_MS) return;
         lastVideoTimeRef.current = v.currentTime;
         lastFrameAtRef.current = now;
@@ -323,6 +437,7 @@ export function usePoseDetection(onRep: () => void) {
           }
           setSnapshot(detector.snapshot());
 
+          frameErrorsRef.current = 0;
           const c = fpsCounterRef.current;
           c.frames += 1;
           if (now - c.since >= 1000) {
@@ -333,6 +448,13 @@ export function usePoseDetection(onRep: () => void) {
         } catch {
           // A single bad frame must not kill the loop — rAF is already rescheduled above.
           detectorRef.current?.markPoseLost();
+          // But a run of them means the engine is broken (typically a lost GPU context):
+          // retry on the CPU rather than fail silently every frame from here on.
+          frameErrorsRef.current += 1;
+          if (frameErrorsRef.current >= MAX_FRAME_ERRORS) {
+            gpuBroken = true;
+            restartRef.current();
+          }
         }
       };
 
@@ -341,7 +463,12 @@ export function usePoseDetection(onRep: () => void) {
       if (runId !== runIdRef.current) return;
       const err = e as Error & { name?: string };
       let message = 'Не удалось получить доступ к камере.';
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      if (err.name === 'NoCameraApi') {
+        message =
+          'Этот браузер не даёт доступ к камере. Открой игру в Safari или Chrome — встроенные браузеры Telegram и Instagram камеру не пускают.';
+      } else if (err.message === 'model-timeout') {
+        message = 'Модель распознавания грузится слишком долго — проверь интернет и нажми «Повторить попытку».';
+      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         message = 'Доступ к камере запрещён. Разреши камеру в настройках браузера и попробуй снова.';
       } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
         message = 'Подходящая камера не найдена на этом устройстве.';
@@ -365,6 +492,45 @@ export function usePoseDetection(onRep: () => void) {
     activeRef.current = false;
     teardown();
   }, [teardown]);
+
+  // A full reopen: used by the stall watchdog, a camera track that ended, and a broken engine.
+  // Throttled so a camera that keeps failing doesn't spin in a restart loop.
+  const lastRestartAtRef = useRef(0);
+  restartRef.current = () => {
+    if (!activeRef.current) return;
+    const now = performance.now();
+    if (now - lastRestartAtRef.current < 4000) return;
+    lastRestartAtRef.current = now;
+    teardown();
+    activeRef.current = true;
+    void open();
+  };
+
+  // Back from the background or an unlocked screen. iOS ends the camera track or pauses the video
+  // when the app is hidden, and nothing tells the page — it just stops getting frames. Check on
+  // the way back in and pick up where things are: play a paused video, reopen a dead camera.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || !activeRef.current) return;
+      // An error on screen (no permission, no camera) waits for "Повторить попытку" — coming
+      // back to the app must not re-raise the permission prompt on its own every time.
+      if (statusRef.current === 'error') return;
+      const track = streamRef.current?.getVideoTracks()[0];
+      const video = videoRef.current;
+      if (!track || track.readyState === 'ended') {
+        restartRef.current();
+      } else if (video?.paused) {
+        lastNewFrameAtRef.current = performance.now();
+        void video.play().catch(() => restartRef.current());
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onVisible);
+    };
+  }, []);
 
   /** Forget the learned range and relearn from the next few reps. */
   const recalibrate = useCallback(() => {
