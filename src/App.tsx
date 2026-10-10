@@ -6,6 +6,8 @@ import { useWakeLock } from './hooks/useWakeLock';
 import { useToasts } from './hooks/useToasts';
 import { NavBar, type ViewId } from './components/NavBar';
 import { ToastStack } from './components/ToastStack';
+import { RankUpOverlay } from './components/RankUpOverlay';
+import { useRankUpQueue } from './lib/rankEvents';
 import { HomeView } from './components/HomeView';
 import { BossView } from './components/BossView';
 import { RushView } from './components/RushView';
@@ -53,9 +55,12 @@ function App() {
     restoreProfile,
     devPatchProfile,
     devResetProfile,
+    startReplay,
+    endReplay,
   } = useProfile();
   const { toasts, push } = useToasts();
   const feedback = useFeedback();
+  const rankUps = useRankUpQueue();
   const cloud = useCloud(profile, derived?.level ?? 1, restoreProfile);
   // Keep the screen alive on the two screens where you're actually working out.
   useWakeLock(view === 'boss' || view === 'rush');
@@ -89,6 +94,7 @@ function App() {
   return (
     <div className="safe-top safe-x flex min-h-screen flex-col bg-arena-bg">
       <ToastStack toasts={toasts} />
+      <RankUpOverlay current={rankUps.current} onDone={rankUps.next} onShow={feedback.rankUp} />
       <SyncGate cloud={cloud} />
       <main className="flex-1 overflow-y-auto">
         {/*
@@ -111,6 +117,11 @@ function App() {
                 buyFreeze={buyFreeze}
                 setWeeklyGoal={setWeeklyGoal}
                 onPurchased={feedback.purchase}
+                onReplay={(i) => {
+                  void startReplay(i).then((ok) => {
+                    if (ok) setView('boss');
+                  });
+                }}
               />
             )}
             {view === 'boss' && (
@@ -122,6 +133,7 @@ function App() {
                 tickArena={tickArena}
                 feedback={feedback}
                 notify={push}
+                endReplay={endReplay}
               />
             )}
             {view === 'stats' && <StatsView profile={profile} />}

@@ -11,6 +11,8 @@ export function BossIcon({
   className,
   bare = false,
   ratio,
+  maxShape,
+  hug,
 }: {
   boss: BossDef;
   index: number;
@@ -19,6 +21,8 @@ export function BossIcon({
   className?: string;
   bare?: boolean;
   ratio?: number;
+  maxShape?: number;
+  hug?: boolean;
 }) {
   return (
     <EnemyIcon
@@ -30,6 +34,8 @@ export function BossIcon({
       className={className}
       bare={bare}
       ratio={ratio}
+      maxShape={maxShape}
+      hug={hug}
     />
   );
 }

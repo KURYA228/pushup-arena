@@ -16,7 +16,9 @@ export interface MinionDef {
 }
 
 /** Named rep cues a stage can ask for instead of the default. */
-export type HitSound = 'coins' | 'oink';
+export type HitSound = 'coins' | 'oink' | 'hurt' | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer';
+/** Recorded lines a boss can say as he walks out (files under `public/sfx/lines/`). */
+export type BossLine = 'lineKrabs' | 'linePig' | 'lineGru' | 'lineSkipper' | 'lineNicole' | 'lineRobin' | 'lineFreddy' | 'lineJoker' | 'lineEnder';
 
 export interface BossDef {
   /**
@@ -55,6 +57,11 @@ export interface BossDef {
    * background noise, while one that starts when the boss appears marks his arrival.
    */
   hitSound?: HitSound;
+  /**
+   * What he says as he walks out, once, after the "Boss" call. A rep cue plays a hundred times
+   * a session, so the voices live here and the rep cues stay plain sound effects.
+   */
+  line?: BossLine;
   /** What makes this fight different. Minions never have any. */
   abilities: BossAbility[];
   minions: MinionDef[];
@@ -78,6 +85,7 @@ interface RawBoss {
   color: string;
   icon: string;
   hitSound?: HitSound;
+  line?: BossLine;
   abilities: BossAbility[];
   minions: [string, string, string];
 }
@@ -98,7 +106,9 @@ const RAW: RawBoss[] = [
     color: '#e0a423',
     icon: '01-grunt.jpg',
     hitSound: 'coins',
-    abilities: [{ kind: 'armor', value: 0.1 }],
+    // Not a line so much as a sigh: the "disappointed" sting from the show.
+    line: 'lineKrabs',
+    abilities: [{ kind: 'armor', value: 0.1 }, { kind: 'entryFee', value: 3 }],
     minions: ['Сквидвард', 'Губка Боб', 'Планктон'],
   },
   {
@@ -115,7 +125,9 @@ const RAW: RawBoss[] = [
     color: '#7ab23c',
     icon: '02-brawler.jpg',
     hitSound: 'oink',
-    abilities: [{ kind: 'armor', value: 0.15 }],
+    // The opening bars of the Angry Birds theme, faded out at the end of the phrase.
+    line: 'linePig',
+    abilities: [{ kind: 'armor', value: 0.15 }, { kind: 'piggyBank', value: 0.04 }],
     minions: ['Капрал', 'Сержант', 'Повар'],
   },
   {
@@ -132,83 +144,113 @@ const RAW: RawBoss[] = [
     critMultiplier: 2.2,
     color: '#9b6bd6',
     icon: '03-berserker.jpg',
-    abilities: [{ kind: 'xpDrain', value: 0.15 }],
+    // His freeze ray, synthesised — see `freezeRay` in src/lib/feedback.ts.
+    hitSound: 'freeze',
+    // "Minions! Tonight, we steal the moon!" — and the cheering after it, faded out.
+    line: 'lineGru',
+    abilities: [{ kind: 'xpDrain', value: 0.15 }, { kind: 'freezeRay', value: 3 }],
     minions: ['Боб', 'Стюарт', 'Кевин'],
   },
   {
+    // And once more: the id stays, the penguins move in.
     id: 'steelguard',
-    name: 'Хребтолом',
-    nameGenitive: 'Хребтолома',
-    title: 'Считает твои позвонки',
-    phrase: 'Ещё один. Ну давай, соври себе снова.',
+    name: 'Шкипер',
+    nameGenitive: 'Шкипера',
+    title: 'Командир элитного отряда',
+    phrase: 'Улыбаемся и машем, бойцы!',
     budget: 450,
     baseDamage: 10,
     critChance: 0.15,
     critMultiplier: 2.2,
-    color: '#5c6773',
+    color: '#f08a24',
     icon: '04-steelguard.jpg',
-    abilities: [{ kind: 'bulwark', value: 0.3 }],
-    minions: ['Костыль', 'Тиски', 'Вправила'],
+    // A flipper chop on every rep; the meme roll call once, as he walks out.
+    hitSound: 'slap',
+    line: 'lineSkipper',
+    abilities: [{ kind: 'bulwark', value: 0.3 }, { kind: 'retreat', value: 0.15 }],
+    minions: ['Рядовой', 'Рико', 'Ковальски'],
   },
   {
+    // The id stays here too; the Wattersons move in.
     id: 'wraith',
-    name: 'Палач',
-    nameGenitive: 'Палача',
-    title: 'Приговор подписан до боя',
-    phrase: '«Завтра начну» — так говорили все, кто здесь лежит.',
+    name: 'Николь',
+    // A woman's name ending in a soft sign doesn't decline: «подчинённый Николь».
+    nameGenitive: 'Николь',
+    title: 'Мама с чёрным поясом',
+    phrase: 'Дарвин — ты приёмный!',
     budget: 700,
     baseDamage: 10,
     critChance: 0.16,
     critMultiplier: 2.5,
-    color: '#5b3a8f',
+    color: '#3fa9e0',
     icon: '05-wraith.jpg',
-    abilities: [{ kind: 'critImmune', value: 1 }],
-    minions: ['Подручный', 'Верёвочник', 'Чтец приговора'],
+    // Claws through the air on every rep (synthesised, `clawSwipe` in src/lib/feedback.ts);
+    // the show's theme as she walks out.
+    hitSound: 'claws',
+    line: 'lineNicole',
+    abilities: [{ kind: 'critImmune', value: 1 }, { kind: 'strictMom', value: 3000 }],
+    minions: ['Анаис', 'Дарвин', 'Гамбол'],
   },
   {
+    // Id kept, as with every stage before it; the pizzeria opens.
     id: 'titanprime',
-    name: 'Изувер',
-    nameGenitive: 'Изувера',
-    title: 'Ему нравится, когда долго',
-    phrase: 'Мне не нужно тебя ломать. Ты бросишь сам.',
+    name: 'Фредди',
+    // Indeclinable: «подчинённый Фредди».
+    nameGenitive: 'Фредди',
+    title: 'Твоя смена — до шести утра',
+    phrase: 'Лучше не смотри в камеру.',
     budget: 1000,
     baseDamage: 10,
     critChance: 0.18,
     critMultiplier: 2.5,
-    color: '#b8860b',
+    color: '#a0632e',
     icon: '06-titanprime.jpg',
-    abilities: [{ kind: 'enrage', value: 0.3 }],
-    minions: ['Клещи', 'Дознаватель', 'Молчаливый'],
+    // His nose honk on every rep (synthesised, `noseHonk` in src/lib/feedback.ts); the meme and
+    // the start of his song as he walks out.
+    hitSound: 'honk',
+    line: 'lineFreddy',
+    abilities: [{ kind: 'enrage', value: 0.3 }, { kind: 'scream', value: 10 }],
+    minions: ['Чика', 'Бонни', 'Фокси'],
   },
   {
+    // Id kept; Gotham's worst move in.
     id: 'voidhammer',
-    name: 'Мор',
-    nameGenitive: 'Мора',
-    title: 'Приходит за целыми залами',
-    phrase: 'Я видел тысячи таких. Ни одного не запомнил.',
+    name: 'Джокер',
+    nameGenitive: 'Джокера',
+    title: 'Смеётся последним',
+    phrase: 'Рассказать анекдот?',
     budget: 1350,
     baseDamage: 10,
     critChance: 0.19,
     critMultiplier: 2.6,
-    color: '#4c3f7a',
+    color: '#7b3fb5',
     icon: '07-voidhammer.jpg',
-    abilities: [{ kind: 'xpDrain', value: 0.25 }],
-    minions: ['Разносчик', 'Чумной', 'Пустой мешок'],
+    // His joy buzzer on every rep (synthesised, `joyBuzzer` in src/lib/feedback.ts); the last,
+    // biggest run of his laugh as he walks out.
+    hitSound: 'buzzer',
+    line: 'lineJoker',
+    abilities: [{ kind: 'xpDrain', value: 0.25 }, { kind: 'jokerCard', value: 0.5 }],
+    minions: ['Пингвин', 'Загадочник', 'Харли Квинн'],
   },
   {
+    // Id kept; the Titans take the tower.
     id: 'ironmaw',
-    name: 'Утроба',
-    nameGenitive: 'Утробы',
-    title: 'Проглатывает не жуя',
-    phrase: 'Давай, старайся. Мне нравится смотреть.',
+    name: 'Робин',
+    nameGenitive: 'Робина',
+    title: 'Лидер Юных Титанов',
+    phrase: 'Титаны, вперёд!',
     budget: 1750,
     baseDamage: 10,
     critChance: 0.2,
     critMultiplier: 2.6,
-    color: '#64748b',
+    color: '#d93a3a',
     icon: '08-ironmaw.jpg',
-    abilities: [{ kind: 'armor', value: 0.25 }],
-    minions: ['Глотка', 'Пищевод', 'Желчь'],
+    // His bo staff on every rep (synthesised, `staffStrike` in src/lib/feedback.ts); his song
+    // from the show as he walks out.
+    hitSound: 'staff',
+    line: 'lineRobin',
+    abilities: [{ kind: 'armor', value: 0.25 }, { kind: 'teamwork', value: 5 }],
+    minions: ['Бист Бой', 'Киборг', 'Старфайр'],
   },
   {
     id: 'bloodking',
@@ -222,7 +264,7 @@ const RAW: RawBoss[] = [
     critMultiplier: 2.8,
     color: '#8b1e2d',
     icon: '09-bloodking.jpg',
-    abilities: [{ kind: 'enrage', value: 0.4 }, { kind: 'regen', value: 0.03 }],
+    abilities: [{ kind: 'enrage', value: 0.4 }, { kind: 'regen', value: 0.015 }],
     minions: ['Кровопуск', 'Десятник', 'Сборщик дани'],
   },
   {
@@ -271,19 +313,23 @@ const RAW: RawBoss[] = [
     minions: ['Предвестник', 'Плакальщик', 'Могильщик'],
   },
   {
+    // Id kept; the End opens.
     id: 'nameless',
-    name: 'Забвение',
-    nameGenitive: 'Забвения',
-    title: 'Тебя не вспомнят',
-    phrase: 'Через неделю ты забудешь, зачем начал. Я подожду.',
+    name: 'Эндер-дракон',
+    nameGenitive: 'Эндер-дракона',
+    title: 'Хозяин Края',
+    phrase: 'Ты быстро повзрослел, хотя ещё недавно был маленьким!',
     budget: 4800,
     baseDamage: 10,
     critChance: 0.26,
     critMultiplier: 3,
-    color: '#cbd5e1',
+    color: '#a855f7',
     icon: '13-nameless.jpg',
-    abilities: [{ kind: 'xpDrain', value: 0.35 }, { kind: 'infection', value: 15 }],
-    minions: ['Стёртый', 'Никто', 'Тень имени'],
+    // Minecraft's own sounds: the damage "oof" on every rep, the level-up jingle as he arrives.
+    hitSound: 'hurt',
+    line: 'lineEnder',
+    abilities: [{ kind: 'xpDrain', value: 0.35 }, { kind: 'infection', value: 15 }, { kind: 'endCrystals', value: 1 }],
+    minions: ['Зомби', 'Скелет', 'Крипер'],
   },
   {
     id: 'threshold',
@@ -335,6 +381,7 @@ export const BOSSES: BossDef[] = RAW.map((r, index) => ({
   color: r.color,
   icon: r.icon,
   hitSound: r.hitSound,
+  line: r.line,
   abilities: r.abilities,
   minions: r.minions.map((name, i) => ({
     id: `${r.id}-m${i + 1}`,

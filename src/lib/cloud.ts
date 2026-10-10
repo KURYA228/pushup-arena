@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient, type Session } from '@supabase/supabase-js';
 import type { ProfileRecord } from '../types';
+import { weekKey } from './weekly';
+import { weekRepsNow } from './training';
 import { streakView, todayLocal } from './streak';
 import { isStale } from './season';
 
@@ -192,6 +194,10 @@ export interface LeaderboardRow {
   streak: number;
   bossesDefeated: number;
   rushBestReps: number;
+  /** Best set without a pause — the strength rank. 0 until supabase/ranks.sql is run. */
+  bestSet: number;
+  /** Push-ups this week — the league. 0 for a count left over from an earlier week. */
+  weekReps: number;
 }
 
 export type CloudError = { message: string } | null;
@@ -220,6 +226,9 @@ function translate(message: string): string {
     return 'Регистрация отключена в настройках проекта.';
   }
   if (m.includes('failed to fetch') || m.includes('network')) return 'Нет связи с сервером.';
+  if (m.includes('provider is not enabled') || m.includes('unsupported provider')) {
+    return 'Вход через Google ещё не включён в настройках Supabase.';
+  }
 
   // Anything unrecognised is shown as-is: a cryptic English line is still better than silence,
   // and it's what makes the next problem diagnosable.
@@ -254,6 +263,27 @@ export async function retrySession(): Promise<Session | null> {
   if (data.session) return data.session;
   const { data: fallback } = await db.auth.getSession();
   return fallback.session;
+}
+
+/**
+ * The error a sign-in through Google came back with, if it did — Supabase puts it in the address
+ * (`error_description`, in the query or the hash) instead of throwing anywhere we could catch.
+ * Read once, at load, before the client tidies the address up; null when there's none.
+ */
+const OAUTH_ERROR: string | null = (() => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const raw = params.get('error_description') ?? hash.get('error_description') ?? params.get('error') ?? hash.get('error');
+    return raw ? translate(raw.replace(/\+/g, ' ')) : null;
+  } catch {
+    return null;
+  }
+})();
+
+export function oauthError(): string | null {
+  return OAUTH_ERROR;
 }
 
 export async function getSession(): Promise<Session | null> {
@@ -367,6 +397,26 @@ export async function signIn(email: string, password: string): Promise<CloudErro
 }
 
 /**
+ * Sign in — or sign up, it's the same step — with a Google account. Leaves the page for Google
+ * and comes back to it signed in; the client picks the session up from the address on return.
+ * A first-timer has no name on the board yet, which the app already asks for on its own
+ * (ChooseNameForm), with the nickname from the intro filled in.
+ *
+ * Needs Google switched on in Supabase (Authentication → Providers) with a client from Google
+ * Cloud — see README, «Вход через Google».
+ */
+export async function signInWithGoogle(): Promise<CloudError> {
+  const db = supabase();
+  if (!db) return { message: 'Облако не настроено.' };
+  const { error } = await db.auth.signInWithOAuth({
+    provider: 'google',
+    // Always the account picker, so a shared device doesn't silently reuse the last account.
+    options: { redirectTo: redirectTarget(), queryParams: { prompt: 'select_account' } },
+  });
+  return error ? { message: translate(error.message) } : null;
+}
+
+/**
  * Signing out keeps the address on file by default, so coming back is one password away.
  * `forget` is the stronger version for a shared or borrowed device: it wipes that trace too.
  */
@@ -436,6 +486,18 @@ export async function pushProfile(profile: ProfileRecord, level: number): Promis
     })
     .eq('id', id);
 
+  // The rank numbers go in their own write: the columns come from supabase/ranks.sql, and on a
+  // project that hasn't run it yet the error must not take the main row down with it.
+  const now = Date.now();
+  await db
+    .from('players')
+    .update({ best_set: profile.bestSet ?? 0, week_reps: weekRepsNow(profile, now), week_key: weekKey(now) })
+    .eq('id', id)
+    .then(
+      () => undefined,
+      () => undefined,
+    );
+
   await db.from('saves').upsert({ id, profile: profile as unknown as Record<string, unknown> });
 }
 
@@ -471,13 +533,19 @@ export async function fetchSave(): Promise<{ profile: ProfileRecord; updatedAt: 
 export async function fetchLeaderboard(limit = 50): Promise<LeaderboardRow[]> {
   const db = supabase();
   if (!db) return [];
-  const { data, error } = await db
-    .from('players')
-    .select('id, display_name, total_pushups, level, streak, bosses_defeated, rush_best_reps')
-    .order('total_pushups', { ascending: false })
-    .limit(limit);
+  const base = 'id, display_name, total_pushups, level, streak, bosses_defeated, rush_best_reps';
+  // With the rank columns where the project has them (supabase/ranks.sql), without where not.
+  const query = (cols: string) =>
+    db.from('players').select(cols).order('total_pushups', { ascending: false }).limit(limit);
+  let res = await query(`${base}, best_set, week_reps, week_key`);
+  if (res.error) res = await query(base);
+  const { data, error } = res;
   if (error || !data) return [];
-  return data.map((r) => ({
+  const thisWeek = weekKey(Date.now());
+  return (data as unknown as Record<string, unknown>[]).map((r) => ({
+    bestSet: (r.best_set as number | undefined) ?? 0,
+    // A count from a week that's over is last week's — this week that player has done none yet.
+    weekReps: r.week_key === thisWeek ? ((r.week_reps as number | undefined) ?? 0) : 0,
     id: r.id as string,
     displayName: r.display_name as string,
     totalPushups: r.total_pushups as number,

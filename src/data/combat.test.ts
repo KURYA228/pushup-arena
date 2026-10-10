@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BOSSES, BOSS_STEP, encounterAt } from './bosses.ts';
-import { NO_STOP_MS, SET_BREAK_MS } from './abilities.ts';
+import { CRYSTAL_REPS, END_CRYSTALS, FREEZE_PAUSE_MS, NO_STOP_MS, SET_BREAK_MS } from './abilities.ts';
 import { applyIdleRegen, freshFight, resolveArenaRep, type ArenaState } from './combat.ts';
 
 const indexOf = (id: string) => BOSSES.findIndex((b) => b.id === id);
@@ -113,7 +113,8 @@ test('Без остановки: длинная пауза стирает вес
 test('Без остановки: пауза короче порога урон не стирает', () => {
   const worked = reps(at('worldbreaker', BOSS_STEP), 12);
   const hp = worked.state.enemyHp;
-  const after = resolveArenaRep(worked.state, worked.endedAt + SET_BREAK_MS, 1);
+  // `endedAt` уже на секунду после последнего повтора; ещё секунда — пауза 2 с, короче порога.
+  const after = resolveArenaRep(worked.state, worked.endedAt + 1000, 1);
   assert.ok(after.next.enemyHp < hp, 'HP не должно откатываться');
 });
 
@@ -179,13 +180,144 @@ test('Заражение: недобитый подчинённый утяжел
   );
 });
 
-test('Обычные боссы без новых способностей ведут себя как раньше', () => {
-  const start = at('grunt', BOSS_STEP);
+test('Обычные удары без срабатываний способностей идут как раньше', () => {
+  // Николь: «Стальная воля» и «Строгая мама» — при ровном темпе ни то ни другое не мешает.
+  const start = at('wraith', BOSS_STEP);
   const { outcomes } = reps(start, 3);
   assert.deepEqual(outcomes.map((o) => o.blocked), [null, null, null]);
   assert.deepEqual(outcomes.map((o) => o.healed), [0, 0, 0]);
-  // Толстокожесть −10% от базовых 10.
-  assert.equal(outcomes[0].damage, 9);
+  assert.deepEqual(outcomes.map((o) => o.events), [[], [], []]);
+  assert.equal(outcomes[0].damage, 10);
+});
+
+/** Reps until `pred` holds for an outcome; returns everything up to and including it. */
+function repsUntil(state: ArenaState, pred: (o: ReturnType<typeof resolveArenaRep>) => boolean, gapMs = 1000) {
+  let s = state;
+  let t = 1_000_000;
+  const outcomes = [];
+  for (let i = 0; i < 2000; i += 1) {
+    const o = resolveArenaRep(s, t, 1);
+    outcomes.push(o);
+    s = o.next;
+    t += gapMs;
+    if (pred(o)) return { state: s, outcomes, endedAt: t, hit: o };
+  }
+  throw new Error('условие так и не выполнилось');
+}
+
+test('Плата за вход: первые 3 повтора каждого подхода — в кассу', () => {
+  const first = reps(at('grunt', BOSS_STEP), 5);
+  assert.deepEqual(first.outcomes.map((o) => o.blocked), ['fee', 'fee', 'fee', null, null]);
+  assert.equal(first.outcomes[3].damage, 9);
+  // Новый подход после паузы — снова платишь.
+  const second = reps(first.state, 2, 1000, first.endedAt + SET_BREAK_MS);
+  assert.deepEqual(second.outcomes.map((o) => o.blocked), ['fee', 'fee']);
+});
+
+test('Копилка: каждый 3-й повтор лечит Свина вместо урона', () => {
+  const max = encounterAt(BOSSES[indexOf('brawler')], BOSS_STEP).hp;
+  const run = reps(at('brawler', BOSS_STEP), 6);
+  assert.deepEqual(run.outcomes.map((o) => o.blocked), [null, null, 'piggy', null, null, 'piggy']);
+  assert.equal(run.outcomes[2].damage, 0);
+  assert.equal(run.outcomes[2].healed, Math.round(max * 0.04));
+});
+
+test('Замораживающий луч: после долгой паузы 3 повтора не бьют', () => {
+  const warm = reps(at('berserker', BOSS_STEP), 2);
+  const after = reps(warm.state, 4, 1000, warm.endedAt + FREEZE_PAUSE_MS);
+  assert.deepEqual(after.outcomes.map((o) => o.blocked), ['frozen', 'frozen', 'frozen', null]);
+  assert.deepEqual(after.outcomes[0].events, ['frozen']);
+  // Пауза короче порога (2 с) — не замораживает.
+  const short = reps(warm.state, 1, 1000, warm.endedAt + 1000);
+  assert.equal(short.outcomes[0].blocked, null);
+});
+
+test('Тактическое отступление: на половине HP Шкипер один раз лечится', () => {
+  const max = encounterAt(BOSSES[indexOf('steelguard')], BOSS_STEP).hp;
+  const run = repsUntil(at('steelguard', BOSS_STEP), (o) => o.events.includes('retreat'));
+  assert.equal(run.hit.healed, Math.round(max * 0.15));
+  assert.equal(run.state.fight.retreatUsed, true);
+  // Второй раз — уже нет, даже снова ниже половины.
+  const rest = repsUntil(run.state, (o) => o.bossDefeated);
+  assert.ok(rest.outcomes.every((o) => !o.events.includes('retreat')));
+});
+
+test('Строгая мама: после паузы от 3 секунд повтор не бьёт — даже после отдыха', () => {
+  const quick = reps(at('wraith', BOSS_STEP), 3, 2900);
+  assert.deepEqual(quick.outcomes.map((o) => o.blocked), [null, null, null]);
+  const slow = reps(at('wraith', BOSS_STEP), 3, 3000);
+  assert.deepEqual(slow.outcomes.map((o) => o.blocked), [null, 'slacking', 'slacking']);
+  // Долгий отдых не спасает: первый повтор после него пропадает, дальше в темпе — бьёт.
+  const warm = reps(at('wraith', BOSS_STEP), 2);
+  const back = reps(warm.state, 3, 1000, warm.endedAt + 60_000);
+  assert.deepEqual(back.outcomes.map((o) => o.blocked), ['slacking', null, null]);
+});
+
+test('Скример: на половине HP пугает, пауза сжигает урон, 10 подряд — выдержал', () => {
+  const scared = repsUntil(at('titanprime', BOSS_STEP), (o) => o.events.includes('scream'));
+  const hpAtScream = scared.state.enemyHp;
+  // Пять ударов, потом пауза — урон за них сгорает.
+  const part = reps(scared.state, 5, 1000, scared.endedAt);
+  assert.ok(part.state.enemyHp < hpAtScream);
+  const burned = reps(part.state, 1, 1000, part.endedAt + SET_BREAK_MS);
+  assert.ok(burned.outcomes[0].events.includes('scream-burned'));
+  assert.ok(burned.outcomes[0].healed > 0);
+  // Повтор после паузы — уже первый из новых десяти; ещё девять без паузы — и он отстаёт.
+  const held = reps(burned.state, 9, 1000, burned.endedAt);
+  assert.ok(held.outcomes[8].events.includes('scream-survived'));
+  assert.ok(held.outcomes.slice(0, 8).every((o) => !o.events.includes('scream-survived')));
+  assert.equal(held.state.fight.scream, null);
+});
+
+test('Карта-джокер: крит по Джокеру лечит его', () => {
+  const hurt = reps(at('voidhammer', BOSS_STEP), 5);
+  const joke = resolveArenaRep(hurt.state, hurt.endedAt, 0);
+  assert.equal(joke.blocked, 'joke');
+  assert.equal(joke.isCrit, false);
+  assert.equal(joke.damage, 0);
+  assert.ok(joke.healed > 0);
+  assert.equal(joke.next.enemyHp, hurt.state.enemyHp + joke.healed);
+});
+
+test('Командная работа: короткий подход Робину не засчитывается', () => {
+  const start = at('ironmaw', BOSS_STEP);
+  const short = reps(start, 3);
+  const next = reps(short.state, 1, 1000, short.endedAt + SET_BREAK_MS);
+  assert.ok(next.outcomes[0].events.includes('covered'));
+  assert.equal(next.outcomes[0].healed, start.enemyHp - short.state.enemyHp);
+  // Подход из пяти — честный.
+  const full = reps(start, 5);
+  const after = reps(full.state, 1, 1000, full.endedAt + SET_BREAK_MS);
+  assert.ok(!after.outcomes[0].events.includes('covered'));
+});
+
+test('Кристаллы Края: урон вдвое меньше, 15 подряд разбивают кристалл', () => {
+  const run = reps(at('nameless', BOSS_STEP), CRYSTAL_REPS * END_CRYSTALS + 1);
+  assert.equal(run.outcomes[0].damage, 5);
+  const breaks = run.outcomes.map((o, i) => (o.events.includes('crystal') ? i + 1 : 0)).filter(Boolean);
+  assert.deepEqual(breaks, [15, 30, 45]);
+  assert.equal(run.state.fight.crystalsBroken, END_CRYSTALS);
+  // Все разбиты — полный урон.
+  assert.equal(run.outcomes.at(-1)?.damage, 10);
+  // Пауза сбрасывает счёт до следующего кристалла.
+  const a = reps(at('nameless', BOSS_STEP), 10);
+  const b = reps(a.state, 10, 1000, a.endedAt + SET_BREAK_MS);
+  assert.ok(b.outcomes.every((o) => !o.events.includes('crystal')));
+});
+
+test('Старое сохранение без новых полей боя не ломается', () => {
+  const s = at('titanprime', BOSS_STEP);
+  const legacy = { ...s, fight: { ...s.fight } } as ArenaState;
+  for (const k of ['frozenLeft', 'retreatUsed', 'screamUsed', 'scream', 'crystalsBroken'] as const) delete legacy.fight[k];
+  const o = resolveArenaRep(legacy, 1_000_000, 1);
+  assert.equal(o.damage, 10);
+});
+
+test('Каждого из боссов можно победить ровным темпом', () => {
+  for (const boss of BOSSES) {
+    const run = repsUntil(at(boss.id, BOSS_STEP), (o) => o.bossDefeated, 1000);
+    assert.ok(run.outcomes.length < 2000, boss.name);
+  }
 });
 
 test('Победа над последним подчинённым помечается выходом на босса', () => {
@@ -209,4 +341,16 @@ test('Смерть босса переносит на первого подчи�
   assert.equal(win.next.enemyHp, encounterAt(BOSSES[indexOf('grunt') + 1], 0).hp);
   assert.equal(win.next.fight.setReps, 0);
   assert.equal(win.next.fight.damageThisSet, 0);
+});
+
+test('Повторная победа над боссом ведёт на следующий этап и ничего не добавляет в победы', () => {
+  // Крабс уже побеждён, мы снова на нём — так бывает только при перепрохождении.
+  const start = { ...at('grunt', BOSS_STEP), bossesDefeated: ['grunt', 'brawler'] };
+  const run = repsUntil(start, (o) => o.bossRebeaten || o.bossDefeated);
+  assert.equal(run.hit.bossRebeaten, true);
+  assert.equal(run.hit.bossDefeated, false);
+  assert.equal(run.hit.next.bossIndex, indexOf('grunt') + 1);
+  assert.equal(run.hit.next.stageStep, 0);
+  assert.equal(run.hit.next.enemyHp, encounterAt(BOSSES[indexOf('grunt') + 1], 0).hp);
+  assert.deepEqual(run.hit.next.bossesDefeated, ['grunt', 'brawler']);
 });

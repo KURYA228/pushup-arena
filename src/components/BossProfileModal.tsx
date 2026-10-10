@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { X } from 'lucide-react';
+import { RotateCcw, X } from 'lucide-react';
 import type { BossDef, BossStatus } from '../data/bosses';
 import { BOSSES } from '../data/bosses';
 import { abilityName, describeAbility } from '../data/abilities';
@@ -16,6 +16,7 @@ export function BossProfileModal({
   level,
   rankName,
   onClose,
+  onReplay,
 }: {
   boss: BossDef;
   index: number;
@@ -26,6 +27,8 @@ export function BossProfileModal({
   level: number;
   rankName: string;
   onClose: () => void;
+  /** A beaten boss can be fought again; absent while a rematch is already on. */
+  onReplay?: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
 
@@ -122,6 +125,20 @@ export function BossProfileModal({
         </div>
 
         {status === 'defeated' && <p className="mt-4 text-xs font-semibold text-arena-amber">Повержен</p>}
+        {status === 'defeated' && onReplay && (
+          <>
+            <button
+              onClick={onReplay}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98]"
+            >
+              <RotateCcw size={16} /> Пройти снова
+            </button>
+            <p className="mt-1.5 text-[11px] leading-snug text-arena-text-dim">
+              Этап заново с первого подчинённого, потом босс и дальше по порядку. Когда дойдёшь до
+              своего текущего этапа, прогресс на нём вернётся как был.
+            </p>
+          </>
+        )}
 
         {status === 'current' && (
           <div className="mt-4">

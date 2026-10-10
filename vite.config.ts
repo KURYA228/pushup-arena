@@ -50,7 +50,7 @@ export default defineConfig({
       workbox: {
         // App shell + JS/CSS/icons are precached for offline use. Pose-detection model/wasm
         // are fetched from CDN at runtime (see README) and are not part of this precache.
-        globPatterns: ['**/*.{js,css,html,svg,png,jpg,ico}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,jpg,webp,ico}'],
         navigateFallback: `${base}index.html`,
         // Runs inside the worker and reloads open windows once a new version activates. The
         // page-side handler in main.tsx can only rescue pages that already run a build

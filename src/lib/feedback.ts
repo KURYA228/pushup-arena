@@ -119,11 +119,28 @@ const SAMPLES = {
   coins: 'sfx/coins.m4a',
   oink: 'sfx/oink.m4a',
   bossfight: 'sfx/bossfight.m4a',
+  headshot: 'sfx/headshot.m4a',
+  // The Minecraft damage "oof", for the Ender Dragon's reps.
+  hurt: 'sfx/hurt.m4a',
+  // Lines a boss says as he walks out, one file each under sfx/lines/.
+  lineKrabs: 'sfx/lines/krabs.m4a',
+  lineEnder: 'sfx/lines/ender.m4a',
+  lineJoker: 'sfx/lines/joker.m4a',
+  lineFreddy: 'sfx/lines/freddy.m4a',
+  lineRobin: 'sfx/lines/robin.m4a',
+  lineNicole: 'sfx/lines/nicole.m4a',
+  linePig: 'sfx/lines/pig.m4a',
+  lineGru: 'sfx/lines/gru.m4a',
+  lineSkipper: 'sfx/lines/skipper.m4a',
 } as const;
 type SampleName = keyof typeof SAMPLES;
 
 /** The ones a stage can name as its rep cue; the rest belong to a particular moment. */
-export type RepSample = Extract<SampleName, 'coins' | 'oink'>;
+export type RepSample = Extract<SampleName, 'coins' | 'oink' | 'hurt'>;
+/** Every rep cue a stage can ask for: a recording, or one synthesised here. */
+export type RepCue = RepSample | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer';
+/** A boss's spoken line, played once as he walks out — see `playBossEncounter`. */
+export type BossLine = Extract<SampleName, `line${string}`>;
 
 const loaded = new Map<SampleName, AudioBuffer>();
 const failed = new Set<SampleName>();
@@ -365,26 +382,31 @@ export function speak(text: string, rate = 0.9, pitch = 0.4): boolean {
 }
 
 /**
- * Crit cue: a shooter-style impact followed by the announcer calling "Headshot".
+ * Crit cue: the shooter "headshot" recording — the same one on every crit, boss or minion, in
+ * the arena and in Rush.
  *
- * The voice comes from the browser's own speech synthesis rather than a bundled recording — the
- * recognisable game samples are somebody else's audio, and TTS costs nothing to ship and works
- * offline. Where no voice exists, a metallic ring stands in so a crit still sounds distinct:
- * its partials are inharmonic (ratios 1 / 1.51 / 2.34, not whole multiples), which is what makes
- * a sound read as struck metal instead of a musical note.
+ * Until the recording is in memory (the first tap of a session starts fetching it) or where it
+ * can't be played at all, the old cue stands in: a synthesised impact and the browser's own
+ * voice calling "Headshot". Where there is no voice either, a metallic ring — its partials are
+ * inharmonic (ratios 1 / 1.51 / 2.34, not whole multiples), which is what makes a sound read as
+ * struck metal instead of a musical note.
  */
 export function playCrit(prefs: FeedbackPrefs) {
   if (prefs.sound) {
-    const spoken = speak('Headshot');
     const c = audioContext();
-    if (c) {
-      hit(c, 2600, 1.1, 0, 0.055, 0.22);
-      sweep(c, 340, 90, 0, 0.1, 0.24, 'triangle');
-      if (!spoken) {
-        const base = 1180;
-        sweep(c, base, base * 0.97, 0.012, 0.42, 0.16);
-        sweep(c, base * 1.51, base * 1.47, 0.012, 0.34, 0.1);
-        sweep(c, base * 2.34, base * 2.28, 0.012, 0.26, 0.06);
+    if (c) loadSample(c, 'headshot');
+    // A voice in the recording: played as recorded, with no per-call pitch wobble.
+    if (!c || !playSample(c, 'headshot', 0.7, { exact: true })) {
+      const spoken = speak('Headshot');
+      if (c) {
+        hit(c, 2600, 1.1, 0, 0.055, 0.22);
+        sweep(c, 340, 90, 0, 0.1, 0.24, 'triangle');
+        if (!spoken) {
+          const base = 1180;
+          sweep(c, base, base * 0.97, 0.012, 0.42, 0.16);
+          sweep(c, base * 1.51, base * 1.47, 0.012, 0.34, 0.1);
+          sweep(c, base * 2.34, base * 2.28, 0.012, 0.26, 0.06);
+        }
       }
     }
   }
@@ -417,8 +439,195 @@ function coins(c: AudioContext, peak: number) {
   }
 }
 
+/**
+ * Gru's freeze ray: a laser "pew" diving down in pitch, then the frost — a hiss of ice forming
+ * and a glassy ping as it sets.
+ *
+ * Under a quarter of a second, so back-to-back reps don't pile up, and re-rolled a few percent
+ * on every call like the coins, so a set doesn't turn into the same zap forty times. The ping's
+ * partials are deliberately inharmonic (1 / 1.41 / 2.13): whole multiples would make a musical
+ * note, and ice isn't one.
+ */
+function freezeRay(c: AudioContext, peak: number) {
+  const k = 0.92 + Math.random() * 0.16;
+  // The beam: a bright square wave sliding down fast, with a sine an octave under it for body.
+  sweep(c, 2600 * k, 520 * k, 0, 0.13, peak * 0.32, 'square');
+  sweep(c, 1300 * k, 260 * k, 0, 0.13, peak * 0.6, 'sine');
+  // Ice forming: high, narrow noise.
+  hit(c, 7200 * k, 2.5, 0.09, 0.1, peak * 0.55);
+  // And setting: a short glassy ping.
+  const ping = 3100 * k;
+  sweep(c, ping, ping * 0.995, 0.11, 0.14, peak * 0.45, 'sine');
+  sweep(c, ping * 1.41, ping * 1.4, 0.11, 0.1, peak * 0.25, 'sine');
+  sweep(c, ping * 2.13, ping * 2.1, 0.11, 0.07, peak * 0.15, 'sine');
+}
+
+/**
+ * Skipper's flipper chop: a swish of air, then the slap — a bright, flat crack of noise with a
+ * short low thump under it for weight. No voice: a rep cue plays a hundred times a session, and
+ * the talking is left to his line before the fight.
+ */
+function flipperSlap(c: AudioContext, peak: number) {
+  const k = 0.9 + Math.random() * 0.2;
+  const t0 = c.currentTime;
+  // The swish: noise through a band-pass sliding up, quiet and quick.
+  const src = c.createBufferSource();
+  src.buffer = noise(c);
+  const band = c.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = 1.2;
+  band.frequency.setValueAtTime(700 * k, t0);
+  band.frequency.exponentialRampToValueAtTime(3200 * k, t0 + 0.07);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(peak * 0.35, t0 + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+  src.connect(band).connect(g).connect(output(c));
+  src.start(t0);
+  src.stop(t0 + 0.1);
+  // The slap itself: wide-band and short, which is what makes it flat and wet rather than a knock.
+  hit(c, 1900 * k, 0.7, 0.075, 0.07, peak);
+  hit(c, 4200 * k, 1.1, 0.075, 0.04, peak * 0.45);
+  // Weight.
+  sweep(c, 190 * k, 70, 0.075, 0.09, peak * 0.6, 'sine');
+}
+
+/** Noise through a band-pass whose centre slides — the raw material of a swish. */
+function swish(c: AudioContext, fromHz: number, toHz: number, atSec: number, durSec: number, q: number, peak: number) {
+  const t0 = c.currentTime + atSec;
+  const src = c.createBufferSource();
+  src.buffer = noise(c);
+  const band = c.createBiquadFilter();
+  band.type = 'bandpass';
+  band.Q.value = q;
+  band.frequency.setValueAtTime(fromHz, t0);
+  band.frequency.exponentialRampToValueAtTime(toHz, t0 + durSec);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(peak, t0 + durSec * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + durSec);
+  src.connect(band).connect(g).connect(output(c));
+  src.start(t0);
+  src.stop(t0 + durSec + 0.02);
+}
+
+/**
+ * Nicole's claws tearing the air: one broad swipe of a paw, and on top of it three thin, high
+ * scratches a hair apart — one per claw — all sweeping down as the paw comes through. Narrow
+ * filters on the scratches are what make them read as claws rather than wind: wide noise is a
+ * whoosh, a tight band of it is a blade. Under a fifth of a second, re-rolled every call.
+ */
+function clawSwipe(c: AudioContext, peak: number) {
+  const k = 0.9 + Math.random() * 0.2;
+  // The paw.
+  swish(c, 2600 * k, 700 * k, 0, 0.16, 0.9, peak * 0.7);
+  // The claws.
+  for (let i = 0; i < 3; i += 1) {
+    const at = 0.02 + i * (0.011 + Math.random() * 0.006);
+    const top = (7800 - i * 900) * k;
+    swish(c, top, top * 0.45, at, 0.09, 7, peak * (0.9 - i * 0.15));
+  }
+}
+
+/**
+ * Robin's bo staff landing: a short swish as it comes round, then a hard, dry wooden "tock".
+ *
+ * Wood is what the band-passed click and the quick-dying pair of tones are for: a hollow knock
+ * has a pitch, but only for a few hundredths of a second — let it ring and it turns into a
+ * marimba. Under a fifth of a second, re-rolled every call.
+ */
+function staffStrike(c: AudioContext, peak: number) {
+  const k = 0.92 + Math.random() * 0.16;
+  // The swing.
+  swish(c, 900 * k, 3200 * k, 0, 0.07, 1.4, peak * 0.35);
+  const at = 0.065;
+  // Contact: a hard click, then the knock of the wood.
+  hit(c, 2400 * k, 1.8, at, 0.025, peak);
+  hit(c, 950 * k, 5, at, 0.06, peak * 0.8);
+  sweep(c, 520 * k, 380 * k, at, 0.07, peak * 0.7, 'triangle');
+  sweep(c, 1340 * k, 1100 * k, at, 0.04, peak * 0.3, 'sine');
+}
+
+/**
+ * Freddy's nose: the squeeze-horn "honk" from the poster in the first game.
+ *
+ * A rubber bulb horn is a buzzy reed — two sawtooths a few cents apart for the rasp, pushed
+ * through a band-pass around 1.4 kHz for the nasal, pinched sound of the bell. The pitch sags a
+ * touch as the bulb runs out of air, which is most of what makes it comic. Under a fifth of a
+ * second, re-rolled every call.
+ */
+function noseHonk(c: AudioContext, peak: number) {
+  const k = 0.94 + Math.random() * 0.12;
+  const t0 = c.currentTime;
+  const dur = 0.17;
+  const band = c.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.value = 1400 * k;
+  band.Q.value = 2.2;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
+  g.gain.setValueAtTime(peak, t0 + dur * 0.55);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  band.connect(g).connect(output(c));
+  for (const detune of [-9, 9]) {
+    const osc = c.createOscillator();
+    osc.type = 'sawtooth';
+    osc.detune.value = detune;
+    osc.frequency.setValueAtTime(410 * k, t0);
+    osc.frequency.linearRampToValueAtTime(445 * k, t0 + 0.03);
+    osc.frequency.exponentialRampToValueAtTime(360 * k, t0 + dur);
+    osc.connect(band);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+}
+
+/**
+ * The Joker's joy buzzer — the joke handshake that shocks: a spark, then a harsh electric buzz.
+ *
+ * The buzz is a low square wave with its loudness chopped by a fast square LFO, which is what
+ * turns a hum into the rattling "bzzzt" of a cheap coil; a high crackle of noise rides on it.
+ * Under a fifth of a second, re-rolled every call.
+ */
+function joyBuzzer(c: AudioContext, peak: number) {
+  const k = 0.93 + Math.random() * 0.14;
+  const t0 = c.currentTime;
+  const dur = 0.17;
+  // The spark.
+  hit(c, 6500 * k, 1.5, 0, 0.02, peak * 0.9);
+  // The buzz.
+  const hum = c.createOscillator();
+  hum.type = 'square';
+  hum.frequency.value = 118 * k;
+  const chop = c.createOscillator();
+  chop.type = 'square';
+  chop.frequency.value = 46 * k;
+  const chopDepth = c.createGain();
+  chopDepth.gain.value = 0.5;
+  const vca = c.createGain();
+  vca.gain.value = 0.5;
+  chop.connect(chopDepth).connect(vca.gain);
+  const tone = c.createBiquadFilter();
+  tone.type = 'bandpass';
+  tone.frequency.value = 900 * k;
+  tone.Q.value = 0.8;
+  const env = c.createGain();
+  env.gain.setValueAtTime(0.0001, t0);
+  env.gain.exponentialRampToValueAtTime(peak * 0.55, t0 + 0.01);
+  env.gain.setValueAtTime(peak * 0.55, t0 + dur * 0.6);
+  env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  hum.connect(vca).connect(tone).connect(env).connect(output(c));
+  for (const o of [hum, chop]) {
+    o.start(t0);
+    o.stop(t0 + dur + 0.02);
+  }
+  // Crackle along the top of it.
+  hit(c, 4200 * k, 3, 0.03, dur - 0.04, peak * 0.3);
+}
+
 /** A counted rep. Crits get their own cue so you can hear one without looking at the screen. */
-export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepSample) {
+export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepCue) {
   if (crit) {
     playCrit(prefs);
     return;
@@ -430,7 +639,13 @@ export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepSample) {
       // can still be in flight on the first rep of a session, or fail to decode entirely,
       // and this screen must never answer a counted rep with silence — that is the one thing
       // the player is listening for with their face at the floor.
-      if (sound) {
+      if (sound === 'freeze') freezeRay(c, 0.3);
+      else if (sound === 'slap') flipperSlap(c, 0.3);
+      else if (sound === 'claws') clawSwipe(c, 0.35);
+      else if (sound === 'staff') staffStrike(c, 0.32);
+      else if (sound === 'honk') noseHonk(c, 0.3);
+      else if (sound === 'buzzer') joyBuzzer(c, 0.3);
+      else if (sound) {
         loadSample(c, sound);
         if (!playSample(c, sound, 0.5)) {
           if (sound === 'coins') coins(c, 0.18);
@@ -476,6 +691,25 @@ function bell(c: AudioContext, freq: number, atSec: number, durSec: number, peak
 }
 
 /**
+ * A promotion: a quick rising arpeggio of bells (C-E-G-C) landing on a bright chord that rings
+ * out, with a low swell under it. Bigger than a level-up beep — a new rank is rarer, and it
+ * should feel like a ceremony.
+ */
+export function playRankUp(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((f, i) => bell(c, f, i * 0.09, 0.35, 0.16));
+      const at = notes.length * 0.09;
+      for (const f of [1046.5, 1318.5, 1568]) bell(c, f, at, 1.4, 0.11);
+      sweep(c, 90, 140, 0, 0.9, 0.18, 'sine');
+    }
+  }
+  buzz(prefs, [60, 40, 60, 40, 160]);
+}
+
+/**
  * "Paid": the confirmation a purchase makes. In the spirit of a phone's payment chime — a tiny
  * tick as the button gives, then two bright bells a fourth apart, the second left to ring —
  * but synthesised here, not a recording of anyone's. Paired with a double tap where vibration
@@ -494,27 +728,118 @@ export function playPurchase(prefs: FeedbackPrefs) {
 }
 
 /** Announces that the minions are done and the boss is in front of you. */
-export function playBossEncounter(prefs: FeedbackPrefs) {
+/**
+ * The line being said right now, with a meter on it, so the fight screen can move the boss in
+ * time with his own voice. One at a time — a new boss's line replaces the last.
+ */
+let lineMeter: { analyser: AnalyserNode; data: Uint8Array<ArrayBuffer>; from: number; to: number } | null = null;
+
+/**
+ * Plays a boss's line through a level meter (see `bossLineLevel`). If the file is still on its
+ * way it waits for it, up to a moment past the cue: a line that lands a beat late is fine, one
+ * that starts five seconds into the fight is not.
+ */
+function playLine(c: AudioContext, name: BossLine, peak: number, delay: number) {
+  const startAt = c.currentTime + delay;
+  const attempt = () => {
+    if (loaded.has(name)) startLine(c, name, peak, Math.max(0, startAt - c.currentTime));
+    else if (!failed.has(name) && c.currentTime < startAt + 0.6) window.setTimeout(attempt, 100);
+  };
+  attempt();
+}
+
+function startLine(c: AudioContext, name: BossLine, peak: number, delay: number) {
+  const buffer = loaded.get(name);
+  if (!buffer) return;
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  const gain = c.createGain();
+  gain.gain.value = peak;
+  const analyser = c.createAnalyser();
+  analyser.fftSize = 1024;
+  src.connect(gain);
+  gain.connect(output(c));
+  gain.connect(analyser);
+  const from = c.currentTime + delay;
+  src.start(from);
+  lineMeter = { analyser, data: new Uint8Array(analyser.fftSize), from, to: from + buffer.duration };
+}
+
+/**
+ * How loud the boss's line is at this instant, 0..1 — or null when no line is under way (not
+ * started yet counts as under way, so a caller can wait for it). Read once a frame.
+ */
+export function bossLineLevel(): number | null {
+  const c = ctx;
+  // A suspended context (no tap yet, the phone's audio taken by something else) has a clock that
+  // doesn't move: the line would be "about to start" forever. Report it as no line at all.
+  if (!lineMeter || !c || c.state !== 'running') return null;
+  const now = c.currentTime;
+  if (now > lineMeter.to) {
+    lineMeter = null;
+    return null;
+  }
+  if (now < lineMeter.from) return 0;
+  const { analyser, data } = lineMeter;
+  analyser.getByteTimeDomainData(data);
+  let sum = 0;
+  for (const v of data) sum += (v - 128) * (v - 128);
+  const rms = Math.sqrt(sum / data.length) / 128;
+  // Speech sits around 0.05–0.3 RMS; this puts ordinary talking at the middle of the range.
+  return Math.min(1, rms * 3.5);
+}
+
+/**
+ * Starts fetching what a boss's entrance needs — the "Boss Fight" call and his line — ahead of
+ * time, so they're in memory by the time he walks out. Safe to call as often as you like.
+ */
+export function preloadBossCues(line?: BossLine) {
+  const c = ctx;
+  if (!c) return;
+  loadSample(c, 'bossfight');
+  if (line) loadSample(c, line);
+}
+
+/** When a boss's own line starts: after the "Boss" call has had its say. */
+const LINE_AT_SEC = LAND_SEC + 1.45;
+
+export function playBossEncounter(prefs: FeedbackPrefs, line?: BossLine) {
   if (prefs.sound) {
     const c = audioContext();
 
     // The recorded call, held back until the word actually lands on screen. Everything else
     // in here plays at once, under the darkening — this is the only cue that has to hit a
     // mark, and the mark is the instant the composition is thrown into place.
-    let announced = false;
+    //
+    // If the file is still on its way — the first boss of a session can come while a dozen
+    // other cues are still downloading — it gets until that mark to arrive, rather than the
+    // synthesised stand-in being picked the instant it isn't there.
+    const sayBoss = () => {
+      // The speech synthesiser says the word instead — lowest pitch it allows and slow enough to
+      // land as a pronouncement.
+      if (speechSupported()) speak('Boss', 0.6, 0);
+    };
     if (c) {
       loadSample(c, 'bossfight');
-      announced = playSample(c, 'bossfight', 0.85, { delay: LAND_SEC, exact: true });
-    }
+      // Wall-clock, not the audio clock: a suspended context's clock stands still, and the wait
+      // would never run out.
+      const mark = Date.now() + LAND_SEC * 1000;
+      const attempt = () => {
+        const left = (mark - Date.now()) / 1000;
+        if (loaded.has('bossfight')) playSample(c, 'bossfight', 0.85, { delay: Math.max(0, left), exact: true });
+        else if (left > 0 && !failed.has('bossfight')) window.setTimeout(attempt, 60);
+        else sayBoss();
+      };
+      attempt();
+    } else window.setTimeout(sayBoss, LAND_SEC * 1000);
+    const spoken = Boolean(c) || speechSupported();
 
-    // Failing that, the speech synthesiser says the word instead — lowest pitch it allows and
-    // slow enough to land as a pronouncement. It cannot be scheduled, so it goes on a timer;
-    // a few milliseconds either way matter far less than having nothing to announce with.
-    if (!announced && speechSupported()) {
-      announced = true;
-      window.setTimeout(() => speak('Boss', 0.6, 0), LAND_SEC * 1000);
+    // And then the boss speaks for himself, where he has a line. Only the recording will do —
+    // nobody wants the speech synthesiser doing an impression — so without it there's no line.
+    if (c && line) {
+      loadSample(c, line);
+      playLine(c, line, 0.85, LINE_AT_SEC);
     }
-    const spoken = announced;
 
     if (c) {
       // Deliberately atonal. An earlier version stacked two sawtooths a tritone apart, which is

@@ -19,6 +19,7 @@ import {
   retrySession,
   setRememberDevice,
   signIn,
+  signInWithGoogle,
   signOut,
   signUp,
   clearPendingName,
@@ -347,6 +348,9 @@ export function useCloud(
     return result;
   }, []);
 
+  /** Off to Google and back; the session arrives through the auth listener on return. */
+  const googleLogin = useCallback(() => signInWithGoogle(), []);
+
   const login = useCallback(async (email: string, password: string, displayName: string) => {
     const err = await signIn(email, password);
     if (err) return err;
@@ -421,6 +425,7 @@ export function useCloud(
       reconcile,
       register,
       login,
+      googleLogin,
       logout,
       rename,
       retry,
@@ -444,6 +449,7 @@ export function useCloud(
       reconcile,
       register,
       login,
+      googleLogin,
       logout,
       rename,
       retry,

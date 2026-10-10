@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import clsx from 'clsx';
 import { SkipForward } from 'lucide-react';
-import { markIntroSeen } from '../lib/intro';
+import { AGE_MAX, AGE_MIN, NICK_MAX, NICK_MIN, markIntroSeen, readIntroAbout, saveIntroAbout } from '../lib/intro';
 
 /**
  * The cold open: the Colosseum, a pull-back into darkness, then the host asking whether you're
@@ -65,7 +64,7 @@ export function Intro({ onDone }: { onDone: () => void }) {
           previous one's exit animation, and animations stop running while the page is hidden —
           so backgrounding the app mid-intro would leave it stuck on the arena. */}
       <AnimatePresence>
-        {act === 'arena' ? <ArenaShot key="arena" /> : <DialogueScene key="talk" onFinish={enter} />}
+        {act === 'arena' ? <ArenaShot key="arena" /> : <HostScene key="talk" onFinish={enter} />}
       </AnimatePresence>
 
       {gate && (
@@ -89,7 +88,8 @@ export function Intro({ onDone }: { onDone: () => void }) {
 
       <button
         onClick={finish}
-        className="safe-bottom absolute bottom-4 right-4 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[11px] text-white/60 backdrop-blur active:scale-95"
+        // Top corner: the bottom of the screen is where the way into the arena appears.
+        className="safe-top absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[11px] text-white/60 backdrop-blur active:scale-95"
       >
         Пропустить <SkipForward size={12} />
       </button>
@@ -124,184 +124,162 @@ function ArenaShot() {
         transition={{ duration: PULL_BACK_SEC, times: [0, 0.6, 1], ease: 'easeIn' }}
       />
 
-      <motion.p
-        className="absolute inset-x-0 bottom-24 text-center text-xs uppercase tracking-[0.4em] text-arena-amber"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: [0, 1, 1, 0] }}
-        transition={{ duration: PULL_BACK_SEC, times: [0, 0.2, 0.75, 0.9] }}
+      {/* The title, big, over the sky as the arena appears. Letter by letter, each rising out
+          of a blur — the name assembling itself — and a word never splits across lines. */}
+      <motion.h1
+        className="absolute inset-x-0 top-[9%] px-4 text-center text-[44px] font-black uppercase leading-[1.05] tracking-[0.06em] text-arena-amber sm:text-6xl"
+        initial={{ opacity: 0, scale: 1.08 }}
+        animate={{ opacity: [0, 1, 1, 0], scale: [1.08, 1, 1, 0.98] }}
+        transition={{ duration: PULL_BACK_SEC, times: [0, 0.15, 0.8, 0.95] }}
         aria-label="Push Up Legends"
       >
-        {/* Letter by letter, each rising out of a blur — the name assembling itself. */}
-        {Array.from('Push Up Legends').map((ch, i) => (
-          <motion.span
-            key={i}
-            aria-hidden
-            className="inline-block"
-            style={{ textShadow: '0 0 10px rgba(245, 158, 11, 0.95), 0 0 26px rgba(245, 158, 11, 0.6), 0 0 48px rgba(245, 158, 11, 0.35)' }}
-            initial={{ opacity: 0, y: 10, filter: 'blur(4px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            transition={{ delay: 0.5 + i * 0.045, duration: 0.4, ease: 'easeOut' }}
-          >
-            {ch === ' ' ? '\u00a0' : ch}
-          </motion.span>
+        {['Push Up', 'Legends'].map((line, li) => (
+          <span key={li} aria-hidden className="block whitespace-nowrap">
+            {Array.from(line).map((ch, i) => (
+              <motion.span
+                key={i}
+                className="inline-block"
+                style={{
+                  textShadow:
+                    '0 0 12px rgba(245, 158, 11, 0.95), 0 0 32px rgba(245, 158, 11, 0.65), 0 0 64px rgba(245, 158, 11, 0.4), 0 2px 2px rgba(0, 0, 0, 0.8)',
+                }}
+                initial={{ opacity: 0, y: 16, filter: 'blur(6px)' }}
+                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                transition={{ delay: 0.35 + (li * 7 + i) * 0.05, duration: 0.45, ease: 'easeOut' }}
+              >
+                {ch === ' ' ? '\u00a0' : ch}
+              </motion.span>
+            ))}
+          </span>
         ))}
-      </motion.p>
+      </motion.h1>
     </motion.div>
   );
 }
 
+const COLOSSEUM = `${import.meta.env.BASE_URL}intro/colosseum.jpg`;
+
 /**
- * The amphitheatre, drawn rather than photographed: two tiers of arches over a lit sand floor.
- * Swap in a picture later by replacing this component — nothing else depends on it.
+ * Floodlights on the rim of the photo, in its own pixels (1536×1024), and which way each one's
+ * beam leans in the picture — the live beams sweep around that same direction.
+ */
+const FLOODLIGHTS = [
+  { x: 150, y: 290, lean: -32 },
+  { x: 366, y: 272, lean: 22 },
+  { x: 797, y: 274, lean: -18 },
+  { x: 1207, y: 296, lean: -16 },
+  { x: 1322, y: 302, lean: 18 },
+];
+
+/** Spots in the stands and on the rim where a camera flash can go off. */
+const FLASHES = Array.from({ length: 16 }, (_, i) => {
+  const t = ((i * 7) % 16) / 15;
+  return { x: 180 + t * 1160, y: 330 + ((i * 37) % 70) - Math.sin(t * Math.PI) * 40 };
+});
+
+/**
+ * The amphitheatre at night: a photo, brought to life on top — floodlight beams sweeping the
+ * sky, the lamps themselves throbbing, and camera flashes popping in the stands.
  */
 function Colosseum() {
-  const outer = Array.from({ length: 15 }, (_, i) => i);
-  const inner = Array.from({ length: 13 }, (_, i) => i);
-
   return (
-    <svg viewBox="0 0 400 260" className="h-auto w-[130%] max-w-none" aria-hidden>
+    // The photo's top and bottom dissolve into the dark around it instead of ending in a
+    // hard edge across the screen.
+    <svg
+      viewBox="0 0 1536 1024"
+      className="h-auto w-[130%] max-w-none"
+      style={{
+        maskImage: 'linear-gradient(to bottom, transparent, #000 14%, #000 82%, transparent)',
+        WebkitMaskImage: 'linear-gradient(to bottom, transparent, #000 14%, #000 82%, transparent)',
+      }}
+      aria-hidden
+    >
       <defs>
-        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1a1208" />
-          <stop offset="60%" stopColor="#3a2410" />
-          <stop offset="100%" stopColor="#0b0c0f" />
-        </linearGradient>
-        <radialGradient id="glow" cx="50%" cy="72%" r="42%">
-          <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.5" />
-          <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
-        </radialGradient>
         <linearGradient id="beam" x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="#ffe7b0" stopOpacity="0.28" />
-          <stop offset="100%" stopColor="#ffe7b0" stopOpacity="0" />
+          <stop offset="0%" stopColor="#dfe8ff" stopOpacity="0.55" />
+          <stop offset="35%" stopColor="#b9c9ff" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="#b9c9ff" stopOpacity="0" />
         </linearGradient>
-        <radialGradient id="torch">
-          <stop offset="0%" stopColor="#ffd27a" stopOpacity="0.95" />
-          <stop offset="45%" stopColor="#f59e0b" stopOpacity="0.45" />
-          <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
+        <radialGradient id="lamp">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
+          <stop offset="30%" stopColor="#dfe8ff" stopOpacity="0.7" />
+          <stop offset="100%" stopColor="#9fb4ff" stopOpacity="0" />
         </radialGradient>
-        <linearGradient id="stone" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#4a3a28" />
-          <stop offset="100%" stopColor="#221a12" />
-        </linearGradient>
+        <radialGradient id="flash">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
+          <stop offset="40%" stopColor="#fff6dd" stopOpacity="0.6" />
+          <stop offset="100%" stopColor="#fff6dd" stopOpacity="0" />
+        </radialGradient>
+        <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="9" />
+        </filter>
       </defs>
 
-      <rect width="400" height="260" fill="url(#sky)" />
-      <motion.ellipse
-        cx="200"
-        cy="190"
-        rx="190"
-        ry="70"
-        fill="url(#glow)"
-        animate={{ opacity: [0.75, 1, 0.75] }}
-        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-      />
+      <image href={COLOSSEUM} width="1536" height="1024" preserveAspectRatio="xMidYMid slice" />
 
-      {/* Outer wall: an ellipse of arches, squashed into perspective. */}
-      <g fill="url(#stone)">
-        <path d="M40 180 Q40 96 200 96 Q360 96 360 180 L360 200 Q200 232 40 200 Z" />
-      </g>
-      <g fill="#0b0c0f">
-        {outer.map((i) => {
-          const t = (i + 0.5) / outer.length;
-          const x = 46 + t * 308;
-          const lift = Math.sin(t * Math.PI) * 26;
-          return <rect key={i} x={x - 6} y={150 - lift} width="12" height={26} rx="6" />;
-        })}
-      </g>
-      <g fill="#0b0c0f" opacity="0.85">
-        {inner.map((i) => {
-          const t = (i + 0.5) / inner.length;
-          const x = 58 + t * 284;
-          const lift = Math.sin(t * Math.PI) * 22;
-          return <rect key={i} x={x - 5} y={118 - lift} width="10" height={22} rx="5" />;
-        })}
+      {/* Searchlights: a beam out of every floodlight, sweeping the sky slowly and out of step,
+          added on top of the picture so the light itself is what moves. */}
+      <g style={{ mixBlendMode: 'screen' }}>
+        {FLOODLIGHTS.map((f, i) => (
+          <motion.polygon
+            key={`beam-${i}`}
+            points={`${f.x - 10},${f.y} ${f.x + 10},${f.y} ${f.x + 80},${f.y - 560} ${f.x - 80},${f.y - 560}`}
+            fill="url(#beam)"
+            filter="url(#soft)"
+            style={{ transformBox: 'fill-box', transformOrigin: '50% 100%' }}
+            initial={{ rotate: f.lean }}
+            animate={{ rotate: [f.lean - 14, f.lean + 14, f.lean - 14], opacity: [0.7, 1, 0.7] }}
+            transition={{ duration: 4 + (i % 3) * 0.9, repeat: Infinity, ease: 'easeInOut', delay: i * 0.4 }}
+          />
+        ))}
       </g>
 
-      {/* The sand, lit from inside. */}
-      <ellipse cx="200" cy="196" rx="120" ry="30" fill="#d9a441" opacity="0.22" />
-      <motion.ellipse
-        cx="200"
-        cy="196"
-        rx="86"
-        ry="20"
-        fill="#f5c26b"
-        animate={{ opacity: [0.14, 0.3, 0.14] }}
-        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-        style={{ filter: 'blur(3px)' }}
-      />
-
-      {/* Searchlights sweeping the sand from either side, slowly, out of step. */}
-      {[
-        { x: 70, from: -18, to: 14, dur: 3.4 },
-        { x: 330, from: 18, to: -14, dur: 3.9 },
-      ].map((b, i) => (
-        <motion.polygon
-          key={`beam-${i}`}
-          points={`${b.x - 3},230 ${b.x + 3},230 ${b.x + 26},70 ${b.x - 26},70`}
-          fill="url(#beam)"
-          style={{ originX: 0.5, originY: 1 }}
-          initial={{ rotate: b.from }}
-          animate={{ rotate: [b.from, b.to, b.from] }}
-          transition={{ duration: b.dur, repeat: Infinity, ease: 'easeInOut' }}
-        />
+      {/* The lamps: a halo that breathes, a hot core, and now and then a bright flare. */}
+      {FLOODLIGHTS.map((f, i) => (
+        <g key={`lamp-${i}`} style={{ mixBlendMode: 'screen' }}>
+          <motion.circle
+            cx={f.x}
+            cy={f.y}
+            r={70}
+            fill="url(#lamp)"
+            animate={{ opacity: [0.35, 0.7, 0.35] }}
+            transition={{ duration: 1.6 + (i % 3) * 0.35, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.circle
+            cx={f.x}
+            cy={f.y}
+            r={26}
+            fill="url(#lamp)"
+            style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+            animate={{ opacity: [0.8, 1, 0.8], scale: [1, 1.2, 1] }}
+            transition={{ duration: 0.9 + (i % 2) * 0.3, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          {/* Flare: a star burst that blinks out of the lamp. */}
+          <motion.g
+            style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+            initial={{ opacity: 0, scale: 0.4 }}
+            animate={{ opacity: [0, 0, 1, 0], scale: [0.4, 0.4, 1.3, 0.6] }}
+            transition={{ duration: 2.6 + i * 0.37, repeat: Infinity, delay: 0.3 + i * 0.45, times: [0, 0.78, 0.84, 1] }}
+          >
+            <rect x={f.x - 90} y={f.y - 2.5} width="180" height="5" rx="2.5" fill="#ffffff" filter="url(#soft)" />
+            <rect x={f.x - 2.5} y={f.y - 60} width="5" height="120" rx="2.5" fill="#ffffff" filter="url(#soft)" />
+            <circle cx={f.x} cy={f.y} r={40} fill="url(#flash)" />
+          </motion.g>
+        </g>
       ))}
-
-      {/* Torches along the top tier, each flickering on its own clock. */}
-      {Array.from({ length: 7 }, (_, i) => {
-        const t = (i + 0.5) / 7;
-        const x = 58 + t * 284;
-        const y = 112 - Math.sin(t * Math.PI) * 22;
-        return (
-          <g key={`torch-${i}`}>
-            <motion.circle
-              cx={x}
-              cy={y}
-              r={18}
-              fill="url(#torch)"
-              opacity={0.35}
-              animate={{ opacity: [0.2, 0.45, 0.25, 0.5, 0.2] }}
-              transition={{ duration: 1.3 + (i % 3) * 0.31, repeat: Infinity, ease: 'easeInOut' }}
-            />
-            <motion.circle
-              cx={x}
-              cy={y}
-              r={7}
-              fill="url(#torch)"
-              animate={{ opacity: [0.55, 0.95, 0.6, 1, 0.55], scale: [1, 1.15, 0.95, 1.1, 1] }}
-              transition={{ duration: 0.9 + (i % 3) * 0.23, repeat: Infinity, ease: 'easeInOut' }}
-              style={{ originX: 0.5, originY: 0.5 }}
-            />
-            <circle cx={x} cy={y} r={1.4} fill="#ffe7b0" />
-          </g>
-        );
-      })}
 
       {/* The crowd: camera flashes going off here and there in the stands. */}
-      {Array.from({ length: 10 }, (_, i) => (
+      {FLASHES.map((p, i) => (
         <motion.circle
           key={`flash-${i}`}
-          cx={70 + ((i * 61) % 260)}
-          cy={124 + ((i * 23) % 44) - Math.sin((((i * 61) % 260) / 260) * Math.PI) * 18}
-          r={1.6}
-          fill="#ffffff"
+          cx={p.x}
+          cy={p.y}
+          r={18}
+          fill="url(#flash)"
+          style={{ transformBox: 'fill-box', transformOrigin: 'center', mixBlendMode: 'screen' }}
           initial={{ opacity: 0 }}
-          animate={{ opacity: [0, 0, 1, 0], scale: [0.6, 0.6, 1.8, 0.6] }}
-          transition={{ duration: 1.6 + (i % 4) * 0.5, repeat: Infinity, delay: 0.4 + i * 0.27, times: [0, 0.8, 0.85, 1] }}
-          style={{ originX: 0.5, originY: 0.5, filter: 'drop-shadow(0 0 3px #fff)' }}
-        />
-      ))}
-
-      {/* Dust in the light. */}
-      {Array.from({ length: 18 }, (_, i) => (
-        <motion.circle
-          key={i}
-          cx={90 + ((i * 47) % 220)}
-          cy={150 + ((i * 29) % 60)}
-          r={0.9 + (i % 3) * 0.5}
-          fill="#f5c26b"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: [0, 0.5, 0], y: [0, -18] }}
-          transition={{ duration: 3 + (i % 4), repeat: Infinity, delay: i * 0.17 }}
+          animate={{ opacity: [0, 0, 1, 0], scale: [0.4, 0.4, 1.4, 0.5] }}
+          transition={{ duration: 1.4 + (i % 4) * 0.45, repeat: Infinity, delay: 0.2 + i * 0.19, times: [0, 0.82, 0.86, 1] }}
         />
       ))}
     </svg>
@@ -309,103 +287,49 @@ function Colosseum() {
 }
 
 
-/**
- * The edge of a portrait that still has a background of its own.
- *
- * Only needed for a photograph: a cut-out carries its own transparency and wants none of this.
- * Dissolving a rectangle is a way of hiding a rectangle, and it never fully works — what you
- * get is a soft-edged rectangle, which is what this is for until the cut-outs arrive.
- */
-const FIGURE_FADE =
-  'radial-gradient(ellipse 62% 58% at 50% 42%, #000 62%, rgba(0, 0, 0, 0.35) 88%, transparent 100%)';
-
-/** How long one pose takes to become the other. */
-const POSE_FADE = 0.45;
-
-/**
- * How much room each side of the conversation gets, in pixels.
- *
- * Not an equal split, because the two sides are not equal things. On the right is a
- * photograph of a man doing something with his hands; on the left is a silhouette standing
- * in for you, and a silhouette is just as readable at half the size. Giving them the same
- * width spent half the row on an icon.
- *
- * It matters most on the picture where he holds up the sign. There the board sets how wide
- * the picture is, so the man inside it is necessarily smaller than in the one where he only
- * raises a hand — and since the pictures are fitted whole, that is not something scaling or
- * cropping can fix. More room for the picture is the only thing that makes him bigger.
- *
- * The two together have to fit a phone across: 110 and 230 plus the gap leaves a margin
- * either side at 375px, which is the narrowest screen worth designing for.
- */
-const PLAYER_W = 110;
-const HOST_W = 230;
-
-
 /* ------------------------------ act two ------------------------------- */
 
-/**
- * Which picture of him is up. He waves by default and holds the sign to name the place.
- *
- * Cut-outs, not photographs. The originals came with a temple behind him, and no amount of
- * dissolving the edges of a rectangle stops it being a rectangle — what you get is a rounded
- * photo card with somebody else's architecture inside it, sitting in a scene it does not
- * belong to. These were lifted off their background with the segmentation that ships with
- * macOS (the same one behind the Finder's "Remove Background"); scripts/cutout.jxa.js does it
- * and can do the next one.
- */
-type Pose = 'wave' | 'sign' | 'call';
-const POSE_FILE: Record<Pose, string> = {
-  wave: 'host-wave.png',
-  sign: 'host-sign.png',
-  call: 'host-call.png',
+/** The host's name, on the plate at his feet. */
+const HOST_NAME = 'Кирюха';
+
+/** The host standing full length, cut out of his own background: waving, then offering a hand. */
+const HOST_WAVE = `${import.meta.env.BASE_URL}intro/host-full.webp`;
+const HOST_GREET = `${import.meta.env.BASE_URL}intro/host-greet.webp`;
+
+/** His opening, in two bubbles: who he is, then — turning to offer his hand — who you are. */
+const HELLO = 'Привет, воин! Я создатель этого всего и хочу посвятить тебя в своё творение!';
+const MEET = 'Давай сначала познакомимся. Меня зовут Кирюха, а тебя?';
+/** How long the hello stays on screen once typed, before the introduction replaces it. */
+const HELLO_HOLD_MS = 1600;
+
+/** When things happen in act two, seconds from its start. */
+const T = {
+  /** The arena comes up out of the dark. */
+  backdrop: 1.2,
+  /** He steps in. */
+  host: 0.9,
+  /** And starts talking once he's there. */
+  speak: 2.1,
 };
-
-interface Line {
-  who: 'host' | 'player';
-  text: string;
-  /** Only on his lines; the pose holds until one of his lines changes it. */
-  pose?: Pose;
-}
-
-// He waves hello, holds up the name of the place while he asks, and beckons once you have
-// said yes — three gestures that match the three beats of the conversation, so the pictures
-// carry it as well as the words do.
-const OPENING: Line[] = [
-  { who: 'host', text: 'Привет, Боец!', pose: 'wave' },
-  { who: 'host', text: 'Решил присоединиться к Push Up Legends?', pose: 'sign' },
-];
-
-const ACCEPTED: Line[] = [
-  { who: 'player', text: 'Конечно' },
-  {
-    who: 'host',
-    text: 'Тогда пол тебя уже ждёт. Пятнадцать боссов, и ни один не отступит.',
-    pose: 'call',
-  },
-];
-
-const REFUSED: Line[] = [
-  { who: 'player', text: 'Нет, отстань от меня' },
-  { who: 'host', text: 'Поздно. Ты уже здесь.', pose: 'call' },
-];
-
-/** The pose set by the most recent line of his, at or before `at`. */
-function lastPose(queue: Line[], at: number): Pose {
-  for (let i = Math.min(at, queue.length - 1); i >= 0; i -= 1) {
-    const p = queue[i].pose;
-    if (p) return p;
-  }
-  return 'sign';
-}
 
 /**
  * A line typed out letter by letter, the way a character speaks in a game. `skip` shows the
  * rest at once — the first tap on a line finishes it, the second moves on.
  */
-function Typewriter({ text, skip, onDone }: { text: string; skip: boolean; onDone: () => void }) {
+function Typewriter({
+  text,
+  skip,
+  onDone,
+  startAt = 0,
+}: {
+  text: string;
+  skip: boolean;
+  onDone: () => void;
+  /** Letters already on screen — a line that carries on from the one before it. */
+  startAt?: number;
+}) {
   const calm = useReducedMotion();
-  const [shown, setShown] = useState(calm ? text.length : 0);
+  const [shown, setShown] = useState(calm ? text.length : startAt);
   const done = skip || shown >= text.length;
 
   useEffect(() => {
@@ -439,154 +363,200 @@ function Typewriter({ text, skip, onDone }: { text: string; skip: boolean; onDon
   );
 }
 
+/** Where the conversation is. */
+type Step = 'hello' | 'meet' | 'name' | 'ask-age' | 'age' | 'welcome';
+
 /**
- * The conversation: you on the left, the host on the right, one line at a time.
- *
- * Lines advance on a tap rather than a timer — a countdown either rushes a slow reader or bores
- * a fast one, and there's nothing to hurry towards. The answer you pick is spoken back as your
- * own line, which is what makes it read as a dialogue instead of a menu.
+ * Act two: the darkened arena, the host stepping in full length in the middle of it, and the
+ * getting-to-know-you — he says hello, turns to offer his hand and asks your name, then your
+ * age, then lets you in. His lines are typed out over his head; a tap finishes one.
  */
-function DialogueScene({ onFinish }: { onFinish: (from: { x: number; y: number }) => void }) {
+function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) => void }) {
   const calm = useReducedMotion();
-  const [queue, setQueue] = useState<Line[]>(OPENING);
-  const [at, setAt] = useState(0);
-  const [branch, setBranch] = useState<'none' | 'accepted' | 'refused'>('none');
-
-  const line = queue[at];
-  const lastOfQueue = at >= queue.length - 1;
-  // His pose holds through your replies — it must not flip back while you are the one
-  // talking — so it comes from the last of his lines, not from the line on screen.
-  const pose = lastPose(queue, at);
-  // The two options only exist at the end of the opening; after a branch there's one way out.
-  const atChoice = lastOfQueue && branch === 'none';
-  const atEnd = lastOfQueue && branch !== 'none';
-
-  /**
-   * Buttons wait for the line to land. They're kept out of the tree rather than merely faded
-   * in, because a transparent button is still a button — you could hit it blind before the
-   * question had finished appearing.
-   */
-  const [answersReady, setAnswersReady] = useState(false);
-  /** Whether the current line has finished typing, and whether a tap asked it to hurry up. */
+  const [step, setStep] = useState<Step | null>(calm ? 'hello' : null);
+  const [skip, setSkip] = useState(false);
   const [typed, setTyped] = useState(false);
-  const [skipTyping, setSkipTyping] = useState(false);
+  const [nick, setNick] = useState(() => readIntroAbout()?.nickname ?? '');
+  const [age, setAge] = useState('');
+
   useEffect(() => {
-    setTyped(false);
-    setSkipTyping(false);
-  }, [at, branch]);
-  useEffect(() => {
-    if ((!atChoice && !atEnd) || !typed) {
-      setAnswersReady(false);
-      return;
-    }
-    // Counted from the last letter now, not from the bubble appearing — the line is read by then.
-    const id = window.setTimeout(() => setAnswersReady(true), 350);
+    if (calm) return;
+    const id = window.setTimeout(() => setStep('hello'), T.speak * 1000);
     return () => window.clearTimeout(id);
-  }, [atChoice, atEnd, at, branch, typed]);
+  }, [calm]);
 
-  const choosing = atChoice && answersReady;
-  const closing = atEnd && answersReady;
-
-  const advance = () => {
-    // First tap finishes the line, the next one moves on.
-    if (!typed) return setSkipTyping(true);
-    if (!lastOfQueue) setAt((i) => i + 1);
+  /** Moves to the next step; a new line starts untyped. */
+  const go = (next: Step) => {
+    setSkip(false);
+    setTyped(false);
+    setStep(next);
   };
+  // The hello stays up long enough to read, then gives way to the introduction (a tap sooner).
+  useEffect(() => {
+    if (step !== 'hello' || !typed) return;
+    const id = window.setTimeout(() => go('meet'), HELLO_HOLD_MS);
+    return () => window.clearTimeout(id);
+  }, [step, typed]);
+  // After a question is asked, its answer field.
+  useEffect(() => {
+    if (!typed) return;
+    if (step === 'meet') setStep('name');
+    if (step === 'ask-age') setStep('age');
+  }, [step, typed]);
 
-  // "Поздно." — the one line that lands with a thump.
-  const thump = branch === 'refused' && line.who === 'host' && !calm;
+  const name = nick.trim();
+  const nameOk = name.length >= NICK_MIN && name.length <= NICK_MAX;
+  const ageNum = Number(age);
+  const ageOk = Number.isInteger(ageNum) && ageNum >= AGE_MIN && ageNum <= AGE_MAX;
 
-  const pick = (chosen: 'accepted' | 'refused') => {
-    setBranch(chosen);
-    setQueue(chosen === 'accepted' ? ACCEPTED : REFUSED);
-    setAt(0);
-  };
+  // What's in his bubble right now, and how much of it was already on screen.
+  const bubble: { text: string; from: number } | null =
+    step === 'hello'
+      ? { text: HELLO, from: 0 }
+      : step === 'meet' || step === 'name'
+        ? { text: MEET, from: 0 }
+        : step === 'ask-age' || step === 'age'
+          ? { text: `Приятно познакомиться, ${name}! А сколько тебе лет?`, from: 0 }
+          : step === 'welcome'
+            ? { text: `Отлично, ${name}! Добро пожаловать на арену. Покажи, на что способен!`, from: 0 }
+            : null;
+  // One bubble per thought: who he is, then the introduction (which stays up while you answer).
+  const lineKey = step === 'name' ? 'meet' : step === 'age' ? 'ask-age' : step;
+  const typing = bubble != null && (step === 'hello' || step === 'meet' || step === 'ask-age' || step === 'welcome') && !typed;
+  // He offers his hand from the introduction on.
+  const greeting = step != null && step !== 'hello';
 
   return (
     <motion.div
-      className="absolute inset-0 flex flex-col justify-end px-5 pb-28 pt-10"
+      className="absolute inset-0"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.6 }}
-      onClick={choosing || closing ? undefined : advance}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.4 }}
+      onClick={() => {
+        if (typing) setSkip(true);
+        else if (step === 'hello') go('meet');
+      }}
     >
-      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-end">
-        {/* Each bubble carries its own side. Putting the alignment on the container instead
-            dragged the outgoing line across to the other speaker while it faded, so the host's
-            words appeared over on your side for a moment. */}
-        <div className="mb-5 flex flex-col">
-          {/*
-            Replaced by `key` rather than cross-faded. Waiting for an outgoing bubble to finish
-            leaving means two of them exist at once — which is how your answer ended up on screen
-            twice — and animations stop while the page is hidden, so a dialogue that waits on one
-            can freeze mid-sentence.
-          */}
-          <motion.div
-            key={`${branch}-${at}`}
-            initial={{ opacity: 0, y: 10, scale: 0.96 }}
-            animate={thump ? { opacity: 1, y: 0, scale: 1, x: [0, -9, 8, -6, 4, 0] } : { opacity: 1, y: 0, scale: 1 }}
-            transition={
-              thump
-                ? { type: 'spring', stiffness: 340, damping: 26, x: { duration: 0.45, delay: 0.1 } }
-                : { type: 'spring', stiffness: 340, damping: 26 }
-            }
-            className={clsx(
-              'max-w-[86%] rounded-2xl border px-4 py-3 text-[15px] font-medium leading-snug',
-              line.who === 'host'
-                ? 'self-end rounded-br-sm border-arena-amber/60 bg-arena-surface text-arena-text shadow-[0_0_22px_rgba(245,158,11,0.35)]'
-                : 'self-start rounded-bl-sm border-arena-border bg-arena-surface-2 text-arena-text-dim',
+      {/* The arena, barely there: dark, a little soft, coming up out of the black. */}
+      <motion.img
+        src={`${import.meta.env.BASE_URL}intro/colosseum.jpg`}
+        alt=""
+        aria-hidden
+        className="absolute inset-0 h-full w-full object-cover"
+        style={{ filter: 'brightness(0.28) saturate(0.8) blur(1.5px)' }}
+        initial={{ opacity: 0, scale: 1.08 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: calm ? 0 : T.backdrop, ease: 'easeOut' }}
+      />
+      {/* Darker at the edges, so the eye goes to the middle where he'll stand. */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{ background: 'radial-gradient(ellipse 70% 60% at 50% 55%, transparent 30%, rgba(0,0,0,0.85) 100%)' }}
+      />
+
+      <div className="safe-top safe-bottom absolute inset-0 flex flex-col items-center justify-end px-5 pb-6">
+        {/* What he says, over his head. */}
+        <div className="relative z-10 mb-3 min-h-[76px] w-full max-w-sm">
+          <AnimatePresence mode="wait">
+            {bubble && (
+              <motion.div
+                key={lineKey}
+                initial={{ opacity: 0, y: 12, scale: 0.92 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, transition: { duration: 0.15 } }}
+                transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+                className="relative rounded-2xl border border-arena-amber/60 bg-arena-surface/95 px-4 py-3 text-center text-[15px] font-semibold leading-snug text-arena-text shadow-[0_0_26px_rgba(245,158,11,0.4)]"
+              >
+                <Typewriter
+                  key={`${step === 'name' ? 'meet' : step === 'age' ? 'ask-age' : step}`}
+                  text={bubble.text}
+                  startAt={bubble.from}
+                  skip={skip || step === 'name' || step === 'age'}
+                  onDone={() => setTyped(true)}
+                />
+                <span className="absolute -bottom-[7px] left-1/2 h-3.5 w-3.5 -translate-x-1/2 rotate-45 border-b border-r border-arena-amber/60 bg-arena-surface" />
+              </motion.div>
             )}
-          >
-            <Typewriter text={line.text} skip={skipTyping} onDone={() => setTyped(true)} />
-          </motion.div>
+          </AnimatePresence>
         </div>
 
-        <div className="relative flex items-end justify-between gap-4">
-          {/* Warm haze behind whoever is speaking, breathing slowly. */}
+        {/* Him, full length, stepping up into the light. */}
+        <motion.div
+          className="relative flex flex-col items-center"
+          initial={calm ? false : { opacity: 0, y: 60, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ delay: T.host, duration: 0.9, ease: [0.22, 0.61, 0.36, 1] }}
+        >
           <motion.div
             aria-hidden
-            className="pointer-events-none absolute bottom-6 h-[70%] w-[65%] rounded-full blur-3xl"
-            style={{ background: 'radial-gradient(circle, rgba(245,158,11,0.45), transparent 70%)' }}
-            animate={{
-              left: line.who === 'host' ? '38%' : '-8%',
-              opacity: calm ? 0.6 : [0.45, 0.8, 0.45],
-            }}
-            transition={{ left: { type: 'spring', stiffness: 120, damping: 20 }, opacity: { duration: 2.6, repeat: Infinity } }}
+            className="pointer-events-none absolute inset-x-[-30%] bottom-[8%] top-[10%] rounded-full blur-3xl"
+            style={{ background: 'radial-gradient(circle, rgba(245,158,11,0.45), transparent 65%)' }}
+            animate={calm ? undefined : { opacity: [0.55, 0.9, 0.55] }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
           />
-          <Portrait file="player.jpg" room={PLAYER_W} speaking={line.who === 'player'} talking={line.who === 'player' && !typed} side="left" />
-          <Portrait file={POSE_FILE[pose]} room={HOST_W} speaking={line.who === 'host'} talking={line.who === 'host' && !typed} side="right" />
-        </div>
+          {/* Two poses on top of each other, cross-faded: waving hello, then a hand held out. */}
+          <motion.div
+            className="relative"
+            style={{ height: 'min(48vh, 460px)', aspectRatio: '446 / 1100' }}
+            animate={calm ? undefined : { scale: [1, 1.012, 1] }}
+            transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            {[HOST_WAVE, HOST_GREET].map((src, i) => (
+              <motion.img
+                key={src}
+                src={src}
+                alt={i === 0 ? HOST_NAME : ''}
+                aria-hidden={i === 1}
+                className="absolute inset-0 h-full w-full object-contain"
+                style={{ filter: 'drop-shadow(0 10px 24px rgba(0,0,0,0.7))' }}
+                initial={false}
+                animate={{ opacity: (i === 1) === greeting ? 1 : 0, scale: (i === 1) === greeting ? 1 : 0.97 }}
+                transition={{ duration: 0.45 }}
+              />
+            ))}
+          </motion.div>
+          <span className="relative -mt-1 rounded-full border border-arena-amber/50 bg-black/60 px-3 py-0.5 text-[11px] font-bold uppercase tracking-[0.3em] text-arena-amber">
+            {HOST_NAME}
+          </span>
+        </motion.div>
 
-        <div className="mt-7 min-h-[104px]">
+        {/* Your answer, or the way in. */}
+        <div className="mt-4 min-h-[96px] w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
           <AnimatePresence mode="wait">
-            {choosing ? (
-              // No exit animation: the answer you pick is immediately spoken back as your own
-              // line, and a button fading out under it showed the same words twice.
-              <motion.div key="choice" className="flex flex-col gap-2">
-                {/* Held back until the question has landed. Appearing alongside it made the
-                    two read as one block, and you answered before you'd finished reading. */}
-                <motion.button
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0, boxShadow: BUTTON_GLOW }}
-                  transition={{ type: 'spring', stiffness: 320, damping: 26, boxShadow: GLOW_PULSE }}
-                  onClick={() => pick('accepted')}
-                  className="arena-glow rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98]"
-                >
-                  Конечно
-                </motion.button>
-                <motion.button
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.12, type: 'spring', stiffness: 320, damping: 26 }}
-                  onClick={() => pick('refused')}
-                  className="rounded-xl border border-arena-border bg-arena-surface py-3 text-sm font-medium text-arena-text-dim active:scale-[0.98]"
-                >
-                  Нет, отстань от меня
-                </motion.button>
-              </motion.div>
-            ) : closing ? (
+            {step === 'name' && (
+              <Answer
+                key="name"
+                label="Твой ник"
+                value={nick}
+                onChange={setNick}
+                placeholder="как тебя звать, воин?"
+                maxLength={NICK_MAX}
+                ok={nameOk}
+                hint={`от ${NICK_MIN} до ${NICK_MAX} символов — так тебя увидят в таблице лидеров`}
+                onSubmit={() => go('ask-age')}
+              />
+            )}
+            {step === 'age' && (
+              <Answer
+                key="age"
+                label="Возраст"
+                value={age}
+                onChange={(v) => setAge(v.replace(/\D/g, '').slice(0, 3))}
+                placeholder="сколько тебе лет?"
+                numeric
+                ok={ageOk}
+                hint={`от ${AGE_MIN} до ${AGE_MAX}`}
+                onSubmit={() => {
+                  void saveIntroAbout({ nickname: name, age: ageNum });
+                  go('welcome');
+                }}
+              />
+            )}
+            {step === 'welcome' && typed && (
               <motion.button
-                key="closing"
+                key="go"
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0, boxShadow: BUTTON_GLOW }}
                 transition={{ type: 'spring', stiffness: 320, damping: 26, boxShadow: GLOW_PULSE }}
@@ -594,9 +564,8 @@ function DialogueScene({ onFinish }: { onFinish: (from: { x: number; y: number }
                   const r = e.currentTarget.getBoundingClientRect();
                   onFinish({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
                 }}
-                className="arena-glow relative w-full overflow-hidden rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98]"
+                className="arena-glow relative mt-6 h-12 w-full overflow-hidden rounded-xl bg-arena-amber text-sm font-bold text-black active:scale-[0.98]"
               >
-                {/* A glint crossing the button now and then — the door is open, go. */}
                 {!calm && (
                   <motion.span
                     aria-hidden
@@ -606,22 +575,8 @@ function DialogueScene({ onFinish }: { onFinish: (from: { x: number; y: number }
                     transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 1.4, ease: 'easeInOut' }}
                   />
                 )}
-                <span className="relative">{branch === 'refused' ? 'Ладно' : 'На арену'}</span>
+                <span className="relative">На арену</span>
               </motion.button>
-            ) : lastOfQueue ? (
-              // The pause between the line landing and the answers appearing. Nothing to
-              // prompt for here: tapping wouldn't advance anything.
-              <span key="pause" />
-            ) : (
-              <motion.p
-                key="hint"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: [0.25, 0.7, 0.25] }}
-                transition={{ duration: 1.8, repeat: Infinity }}
-                className="pt-3 text-center text-xs text-arena-text-dim"
-              >
-                нажми, чтобы продолжить
-              </motion.p>
             )}
           </AnimatePresence>
         </div>
@@ -630,136 +585,63 @@ function DialogueScene({ onFinish }: { onFinish: (from: { x: number; y: number }
   );
 }
 
-/**
- * One of the two faces. Drops in a photo from `public/intro/` when the file exists; until then
- * it's a lit silhouette, so the scene reads properly with nothing supplied. The one talking is
- * brought forward and lit — otherwise there's no telling who the line belongs to.
- */
-function Portrait({
-  file,
-  speaking,
-  talking = false,
-  side,
-  room,
+/** An answer to the host: one field and "Дальше", Enter submitting too. */
+function Answer({
+  label,
+  value,
+  onChange,
+  placeholder,
+  maxLength,
+  numeric = false,
+  ok,
+  hint,
+  onSubmit,
 }: {
-  file: string;
-  speaking: boolean;
-  /** Mid-line: a little bob, the way a talking character moves. */
-  talking?: boolean;
-  side: 'left' | 'right';
-  /** How wide this portrait may get, in pixels. */
-  room: number;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  maxLength?: number;
+  numeric?: boolean;
+  ok: boolean;
+  hint: string;
+  onSubmit: () => void;
 }) {
-  const [missing, setMissing] = useState(false);
-  // A PNG is taken to be a real cut-out with its own transparency; a JPEG is a rectangular
-  // photograph with a background baked into it. The same test the fight screen's artwork uses.
-  const cutout = /\.png$/i.test(file);
-  // A standing figure, not a head in a circle: these are full-length photographs, and a
-  // round crop of one is a picture of a chest. Big enough to see what he is doing with his
-  // hands, which is the whole point of there being two of them — he waves, then he holds
-  // up the name of the place.
-  //
-  // Both limits are needed and they bind on different screens. Width: two of these sit side
-  // by side, so neither may take more than its share of the row — that is what caps them on
-  // a phone. Height: the dialogue has a bubble above and two buttons below, and on a short
-  // laptop window the whole column would run off the top — that is what caps them there.
-  // Taller than it used to be. The pictures are fitted whole, so whichever of width and
-  // height runs out first decides how big the man is — and at the old 32vh it was always the
-  // height, which meant the extra width given to his side did nothing at all.
-  const box = { width: '100%', height: 'min(320px, 38vh)' } as const;
-
   return (
-    <motion.div
-      animate={{
-        scale: speaking ? 1 : 0.88,
-        opacity: speaking ? 1 : 0.45,
-        y: speaking ? -6 : 0,
+    <motion.form
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8, transition: { duration: 0.15 } }}
+      transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ok) onSubmit();
       }}
-      transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-      // An equal share of the row, capped. A percentage on the picture itself resolved
-      // against this box, which shrink-wraps its contents — so it came out the width of the
-      // caption underneath.
-      className="flex min-w-0 flex-1 flex-col items-center"
-      style={{ maxWidth: room }}
     >
-      <motion.span
-        className="relative flex items-end justify-center"
-        animate={talking ? { y: [0, -3, 0, -2, 0], rotate: [0, -0.8, 0, 0.6, 0] } : { y: 0, rotate: 0 }}
-        transition={talking ? { duration: 0.7, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
-        style={{
-          ...box,
-          // Mirrored so the two of them face each other rather than both looking the same way.
-          // As framer's own scaleX, not a CSS transform: the talking bob animates the transform,
-          // and a hand-written one would be overwritten and flip him back.
-          scaleX: side === 'left' ? -1 : 1,
-        }}
-      >
-        {missing ? (
-          // A bare silhouette, on nothing. It used to sit on a rounded plate with a lit
-          // gradient inside it, which was fine while the other side was a photograph in a
-          // box too — once he became a cut-out standing in the scene, the plate was the only
-          // rectangle left on the screen and read as the thing that hadn't loaded.
-          <span className="flex h-full w-full items-end justify-center">
-            <svg
-              viewBox="0 0 100 100"
-              width="80%"
-              height="80%"
-              aria-hidden
-              style={{
-                filter: speaking
-                  ? 'drop-shadow(0 0 14px rgba(245, 158, 11, 0.6)) drop-shadow(0 0 40px rgba(245, 158, 11, 0.4))'
-                  : 'none',
-              }}
-            >
-              <circle cx="50" cy="34" r="17" fill="#f59e0b" opacity="0.5" />
-              <path d="M18 100 Q22 62 50 58 Q78 62 82 100 Z" fill="#f59e0b" opacity="0.5" />
-            </svg>
-          </span>
-        ) : (
-          // Keyed on the file, so changing pose mounts the new one and lets the old one leave
-          // rather than swapping the `src` underneath a single element. A `src` swap is a cut:
-          // one frame he is waving, the next he is holding a sign. Both are laid over each
-          // other and absolutely placed, because two images in the flow would stand side by
-          // side for the length of the dissolve and shove the column about.
-          <AnimatePresence initial={false}>
-            <motion.img
-              key={file}
-              src={`${import.meta.env.BASE_URL}intro/${file}`}
-              alt=""
-              aria-hidden="true"
-              onError={() => setMissing(true)}
-              className="absolute inset-0"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: POSE_FADE, ease: 'easeInOut' }}
-              style={{
-                width: '100%',
-                height: '100%',
-                // A cut-out is fitted whole and stood on the floor of its box: `cover` would
-                // trim a figure that isn't the box's shape, and trimming a cut-out takes the
-                // hand or the crest off. A photograph is still cropped to fill, because the
-                // part being lost there is background.
-                objectFit: cutout ? 'contain' : 'cover',
-                objectPosition: cutout ? 'bottom' : 'top',
-                // Only a photograph needs its edges dissolved. A cut-out has no edges to
-                // hide, and masking one would eat the hand he is waving.
-                ...(cutout
-                  ? null
-                  : { maskImage: FIGURE_FADE, WebkitMaskImage: FIGURE_FADE }),
-                // On a cut-out the shadow traces the figure, which is what makes him read as
-                // lit from the scene rather than as a lit rectangle.
-                filter: speaking
-                  ? 'drop-shadow(0 0 16px rgba(245, 158, 11, 0.65)) drop-shadow(0 0 46px rgba(245, 158, 11, 0.4))'
-                  : 'none',
-              }}
-            />
-          </AnimatePresence>
-        )}
-      </motion.span>
-      <span className="mt-1 text-[10px] uppercase tracking-widest text-arena-text-dim">
-        {side === 'left' ? 'ты' : 'арена'}
-      </span>
-    </motion.div>
+      <label className="block text-[11px] font-semibold uppercase tracking-wider text-arena-amber">{label}</label>
+      <div className="mt-1 flex gap-2">
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          inputMode={numeric ? 'numeric' : 'text'}
+          enterKeyHint="next"
+          autoComplete="off"
+          className="min-w-0 flex-1 rounded-xl border border-arena-amber/50 bg-black/60 px-3 py-3 text-base text-arena-text outline-none backdrop-blur placeholder:text-arena-text-dim focus:border-arena-amber"
+        />
+        <motion.button
+          type="submit"
+          disabled={!ok}
+          animate={ok ? { boxShadow: BUTTON_GLOW } : { boxShadow: 'none' }}
+          transition={ok ? GLOW_PULSE : { duration: 0.2 }}
+          className="shrink-0 rounded-xl bg-arena-amber px-4 text-sm font-bold text-black active:scale-95 disabled:opacity-40"
+        >
+          Дальше
+        </motion.button>
+      </div>
+      <p className="mt-1 text-[11px] text-arena-text-dim">{hint}</p>
+    </motion.form>
   );
 }

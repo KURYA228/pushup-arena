@@ -293,18 +293,15 @@ export function CameraPanel({
                     {snapshot.angle != null ? `${snapshot.angle}°` : '—'}
                     {snapshot.rom != null && ` · размах ${snapshot.rom}°`} · {pose.fps} fps
                   </p>
-                  {/* The understudy: a little legionary who copies you — down when you go down,
-                      a bounce and a quip on every counted rep, asleep while there's nobody to
-                      copy. Fills the empty corner, and it's a second way to see the camera
-                      really is following you. Centred in the column rather than pushed to its
-                      edge, so his Zs have room to rise. */}
+                  {/* The understudy: a legionary who pushes along while the camera sees you,
+                      cheers each counted rep, and sleeps while there's nobody to copy. Fills the
+                      empty corner, and it's a second way to see the camera really is following
+                      you. */}
                   {!bigPreview && (
-                    <div className="flex justify-end pr-6">
+                    <div className="flex justify-center">
                       <PushupGuy
-                        className="-my-2 h-[80px] w-[188px]"
-                        bare
+                        className="h-[88px] w-[112px]"
                         mode={following ? 'follow' : 'sleep'}
-                        depth={snapshot.depth}
                         repKey={snapshot.reps}
                         quip={QUIPS[snapshot.reps % QUIPS.length]}
                       />
@@ -449,11 +446,9 @@ export function CameraPanel({
       </div>
       )}
 
-      {mode === 'camera' ? null : plusCounts ? (
-        <p className="mt-2 text-center text-[11px] leading-snug text-arena-red">
-          DEV: «+» засчитывает отжимание — выключается в дев-панели
-        </p>
-      ) : (
+      {/* Nothing under the button while the dev switch has «+» counting reps: the switch lives
+          in the dev panel, and a warning line on the fight screen only got in the way. */}
+      {mode === 'camera' || plusCounts ? null : (
       <p className="mt-2 text-center text-[11px] leading-snug text-arena-text-dim">
         <span className="font-semibold uppercase tracking-wider text-arena-amber">Кликер</span>{' '}
         <span className="tabular-nums text-arena-text">{clickerTotal}</span>

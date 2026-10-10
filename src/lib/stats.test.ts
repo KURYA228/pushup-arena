@@ -45,9 +45,9 @@ test('dailyTotals fills empty days and ends on today', () => {
   ]);
 });
 
-test('splitSets breaks on a pause of six seconds or more', () => {
+test('splitSets breaks on a pause of three seconds or more', () => {
   const t = at(2026, 10, 8);
-  const sets = splitSets([rep(t), rep(t + 5999), rep(t + 5999 + 6000), rep(t + 5999 + 6000 + 100)]);
+  const sets = splitSets([rep(t), rep(t + 2999), rep(t + 2999 + 3000), rep(t + 2999 + 3000 + 100)]);
   assert.deepEqual(sets.map((s) => s.reps), [2, 2]);
 });
 

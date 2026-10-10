@@ -11,6 +11,7 @@ import { BossGallery } from './BossGallery';
 import { BossProfileModal } from './BossProfileModal';
 import { ShopModal } from './ShopModal';
 import { WeeklyGoal } from './WeeklyGoal';
+import { RanksCard } from './RanksCard';
 import { FEEDBACK_FORM_URL } from '../lib/feedbackForm';
 import type { UpgradeId } from '../data/shop';
 import { CountUp } from './CountUp';
@@ -31,6 +32,7 @@ export function HomeView({
   buyFreeze,
   setWeeklyGoal,
   onPurchased,
+  onReplay,
 }: {
   profile: ProfileRecord;
   derived: Derived;
@@ -38,6 +40,8 @@ export function HomeView({
   buyFreeze: () => Promise<boolean>;
   setWeeklyGoal: (goal: number, daily: number | null) => Promise<void>;
   onPurchased: () => void;
+  /** Starts a rematch with a beaten boss and takes you to the fight. */
+  onReplay: (bossIndex: number) => void;
 }) {
   const upcoming = nextRank(derived.level);
   // The stored streak goes stale while you're away; this is what it actually is today.
@@ -70,7 +74,10 @@ export function HomeView({
         >
           Push Up Legends
         </button>
-        <h1 className="mt-1 text-2xl font-bold text-arena-text">{derived.rank.name}</h1>
+        <h1 className="mt-1 text-2xl font-bold" style={{ color: derived.rank.color }}>
+          <span className="mr-1.5">{derived.rank.icon}</span>
+          {derived.rank.name}
+        </h1>
         {upcoming && (
           <p className="mt-0.5 text-xs text-arena-text-dim">
             до ранга «{upcoming.name}» — уровень {upcoming.minLevel}
@@ -150,6 +157,8 @@ export function HomeView({
           <ShoppingBag size={14} /> Магазин — потратить XP на улучшения
         </button>
       </section>
+
+      <RanksCard profile={profile} level={derived.level} />
 
       <WeeklyGoal profile={profile} setWeeklyGoal={setWeeklyGoal} />
 
@@ -333,6 +342,14 @@ export function HomeView({
             level={derived.level}
             rankName={derived.rank.name}
             onClose={() => setOpenIndex(null)}
+            onReplay={
+              derived.replaying
+                ? undefined
+                : () => {
+                    setOpenIndex(null);
+                    onReplay(openIndex);
+                  }
+            }
           />
         )}
       </AnimatePresence>

@@ -1,8 +1,11 @@
-import type { FightState } from './data/combat';
+import type { AbilityEvent, BlockedReason, FightState } from './data/combat';
 import type { Upgrades } from './data/shop';
+import type { RankUp } from './data/ranks';
+import type { Training } from './lib/training';
 
 // Central persisted profile shape stored in IndexedDB (see src/db/db.ts).
-export interface ProfileRecord {
+/** Weekly push-ups, the current set and the best set — see src/lib/training.ts. */
+export interface ProfileRecord extends Training {
   id: number;
   totalPushups: number;
   /** Lifetime cumulative XP. Level/rank are always derived from this — single source of truth. */
@@ -62,6 +65,21 @@ export interface ProfileRecord {
    * written before seasons existed, which count as season 0.
    */
   season?: number;
+  /**
+   * A replay of beaten stages, if one is under way: the stage it began from, when, and where the
+   * real progress stood — restored as it was once the run catches up with it or you walk away.
+   */
+  replay?: ReplayState | null;
+  /** The name given to the host in the intro — also the default name on the board. */
+  nickname?: string;
+  /** Age, as told to the host in the intro. */
+  age?: number;
+}
+
+export interface ReplayState {
+  bossIndex: number;
+  startedAt: number;
+  returnTo: { currentBossIndex: number; stageStep: number; enemyHp: number; fight: FightState };
 }
 
 /**
@@ -92,6 +110,10 @@ export interface RepUndo {
   logId: number | null;
   /** The weekly-goal marker from before the rep, in case this rep is the one that paid it. */
   weeklyRewardWeekBefore?: string;
+  /** The rematch from before the rep, in case this rep is the one that won it. */
+  replayBefore?: ReplayState | null;
+  /** Weekly count, current set and best set from before the rep. */
+  trainingBefore?: Training;
 }
 
 /**
@@ -127,8 +149,16 @@ export interface RepResult {
   revived: boolean;
   /** The rep cleared the last minion — the boss himself is next. */
   bossReached: boolean;
+  /** A boss already beaten went down again on a replay; the run goes on to the next stage. */
+  bossRebeaten: boolean;
+  /** The replay caught up with the real progress, which is back as it was left. */
+  replayWon: boolean;
+  /** Promotions this rep earned — a new title, league division or strength rank. */
+  rankUps: RankUp[];
   /** Set when an ability swallowed the rep, so the UI can explain the missing damage. */
-  blocked: 'blind-spot' | 'odd-rep' | 'last-stand' | null;
+  blocked: BlockedReason;
+  /** Ability moments the rep set off — a crystal breaking, a scream, a freeze. */
+  events: AbilityEvent[];
   /** HP the enemy regained from the pause before this rep. */
   healed: number;
   /** Who the rep was aimed at, for damage popups and toasts. */

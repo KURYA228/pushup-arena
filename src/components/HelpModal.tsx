@@ -61,7 +61,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
           <X size={16} />
         </button>
 
-        <PushupGuy className="mx-auto mb-1 h-24 w-52 md:h-32 md:w-72" />
+        <PushupGuy className="mx-auto mb-2 h-36 w-44 md:h-44 md:w-56" />
         <h2 className="text-center text-xl font-bold text-arena-text">Как играть</h2>
         <p className="mt-1 text-center text-xs text-arena-text-dim">Отжимания — это удары. Всё остальное ниже.</p>
 

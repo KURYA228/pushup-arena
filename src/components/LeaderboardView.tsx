@@ -18,6 +18,7 @@ import type { Cloud, LeaderboardRow } from '../hooks/useCloud';
 import { movement, readRanks, saveRanks } from '../lib/rankHistory';
 import { AuthView, ChooseNameForm } from './AuthView';
 import { Avatar } from './PlayerBadge';
+import { getRank, leagueFor, strengthFor } from '../data/ranks';
 import { CountUp } from './CountUp';
 
 /**
@@ -33,6 +34,8 @@ const SORTS = [
   { id: 'level', label: 'Уровень', unit: 'ур.', value: (r: LeaderboardRow) => r.level },
   { id: 'bosses', label: 'Боссы', unit: '', value: (r: LeaderboardRow) => r.bossesDefeated },
   { id: 'rush', label: 'Rush', unit: '', value: (r: LeaderboardRow) => r.rushBestReps },
+  { id: 'league', label: 'Лига', unit: '', value: (r: LeaderboardRow) => r.weekReps },
+  { id: 'set', label: 'Подход', unit: '', value: (r: LeaderboardRow) => r.bestSet },
 ] as const;
 
 type SortId = (typeof SORTS)[number]['id'];
@@ -163,7 +166,7 @@ export function LeaderboardView({
     // its own ceiling instead of filling the page the way the arena screens do.
     <div className="arena-page pb-8 pt-6 [&>*]:mx-auto [&>*]:max-w-2xl">
       <header className="mb-4 flex items-center gap-3">
-        <Avatar name={cloud.name} size="md" />
+        <Avatar name={cloud.name} size="md" level={myIndex >= 0 ? ordered[myIndex].level : undefined} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-bold text-arena-text">{cloud.name}</p>
           <p className="truncate text-[11px] text-arena-text-dim">
@@ -247,12 +250,13 @@ export function LeaderboardView({
 
 function SortBar({ sort, onChange }: { sort: SortId; onChange: (s: SortId) => void }) {
   return (
-    <div className="flex gap-1 rounded-xl border border-arena-border bg-arena-surface p-1">
+    // Two rows of three on a phone: six labels in one row would cut "Отжимания" short.
+    <div className="grid grid-cols-3 gap-1 rounded-xl border border-arena-border bg-arena-surface p-1 sm:grid-cols-6">
       {SORTS.map((s) => (
         <button
           key={s.id}
           onClick={() => onChange(s.id)}
-          className="relative flex-1 rounded-lg px-1 py-1.5 text-[11px] font-semibold"
+          className="relative rounded-lg px-1 py-1.5 text-[11px] font-semibold"
         >
           {sort === s.id && (
             <motion.span
@@ -304,6 +308,7 @@ function Podium({ rows, sortId, myId }: { rows: LeaderboardRow[]; sortId: SortId
               </motion.span>
               <Avatar
                 name={row.displayName}
+                level={row.level}
                 size={place === 0 ? 'md' : 'sm'}
                 className={place === 0 ? 'arena-glow' : undefined}
               />
@@ -319,6 +324,7 @@ function Podium({ rows, sortId, myId }: { rows: LeaderboardRow[]; sortId: SortId
                 <CountUp value={metric.value(row)} />
                 {metric.unit && <span className="ml-0.5 font-normal text-arena-text-dim">{metric.unit}</span>}
               </p>
+              {metric.id === 'league' && <LeagueStep reps={row.weekReps} />}
             </motion.div>
             <motion.div
               initial={{ height: 0 }}
@@ -399,10 +405,11 @@ function Row({
       )}
     >
       <RankMark rank={rank} />
-      <Avatar name={row.displayName} size="sm" />
+      <Avatar name={row.displayName} size="sm" level={row.level} />
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-arena-text">
+        <p className="flex items-center gap-1.5 truncate text-sm font-semibold" style={{ color: getRank(row.level).color }}>
           {row.displayName}
+          <RankIcons row={row} />
           {delta !== null && (
             <span
               className={clsx(
@@ -416,7 +423,7 @@ function Row({
           )}
         </p>
         <p className="truncate text-[11px] text-arena-text-dim">
-          уровень {row.level} · боссов {row.bossesDefeated} · Rush {row.rushBestReps}
+          {getRank(row.level).name} · ур. {row.level} · {leagueFor(row.weekReps).name} · {strengthFor(row.bestSet).name}
         </p>
       </div>
       {row.streak > 0 && (
@@ -425,10 +432,34 @@ function Row({
           {row.streak}
         </span>
       )}
-      <span className="shrink-0 text-sm font-bold tabular-nums text-arena-text">
-        {metric.value(row)}
+      <span className="flex shrink-0 flex-col items-end leading-tight">
+        <span className="text-sm font-bold tabular-nums text-arena-text">{metric.value(row)}</span>
+        {/* On the league tab the number is this week's push-ups; the step it puts them on. */}
+        {sortId === 'league' && <LeagueStep reps={row.weekReps} />}
       </span>
     </motion.li>
+  );
+}
+
+/** "Платина II", in the league's colour, with its icon. */
+function LeagueStep({ reps }: { reps: number }) {
+  const league = leagueFor(reps);
+  return (
+    <span className="whitespace-nowrap text-[10px] font-semibold" style={{ color: league.tier.color }}>
+      {league.tier.icon} {league.name}
+    </span>
+  );
+}
+
+/** The league and strength badges next to a name — only the ones worth showing. */
+function RankIcons({ row }: { row: LeaderboardRow }) {
+  const league = leagueFor(row.weekReps);
+  const strength = strengthFor(row.bestSet);
+  return (
+    <span className="flex shrink-0 items-center gap-0.5 text-xs leading-none">
+      {row.weekReps > 0 && <span title={`Лига недели: ${league.name}`}>{league.tier.icon}</span>}
+      {strength.min > 0 && <span title={`Сила: ${strength.name}`}>{strength.icon}</span>}
+    </span>
   );
 }
 

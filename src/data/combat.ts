@@ -1,5 +1,11 @@
 import {
+  CRYSTAL_REPS,
+  CRYSTAL_SHIELD,
+  END_CRYSTALS,
+  FREEZE_PAUSE_MS,
+  HALF_HP,
   NO_STOP_MS,
+  PIGGY_EVERY,
   SET_BREAK_MS,
   abilityValue,
   critLands,
@@ -50,6 +56,18 @@ export interface FightState {
    * heal is a function of wall-clock time, not of when the app happened to be looking.
    */
   regenAt: number | null;
+  // The bosses' own abilities. Optional: saves written before them have none of these, and a
+  // missing field reads as "nothing happened yet".
+  /** Reps still frozen by "Замораживающий луч". */
+  frozenLeft?: number;
+  /** "Тактическое отступление" is spent. */
+  retreatUsed?: boolean;
+  /** "Скример" is spent. */
+  screamUsed?: boolean;
+  /** A scream in progress: HP when it went off, and reps done since without a pause. */
+  scream?: { hp: number; reps: number } | null;
+  /** "Кристаллы Края" broken so far. */
+  crystalsBroken?: number;
 }
 
 export interface ArenaState {
@@ -61,13 +79,38 @@ export interface ArenaState {
 }
 
 /** Why a rep did no damage, so the UI can say so instead of looking broken. */
-export type BlockedReason = 'blind-spot' | 'odd-rep' | 'last-stand' | null;
+export type BlockedReason =
+  | 'blind-spot'
+  | 'odd-rep'
+  | 'last-stand'
+  | 'fee'
+  | 'piggy'
+  | 'frozen'
+  | 'slacking'
+  | 'joke'
+  | null;
+
+/**
+ * One-off moments a boss ability makes, for the fight screen to play out. A rep can carry more
+ * than one: the pause that ended a short set under "Командная работа" can also be the one that
+ * fires "Замораживающий луч".
+ */
+export type AbilityEvent =
+  | 'frozen' // Gru's ray just hit: the next reps are frozen.
+  | 'retreat' // Skipper fell back and patched himself up.
+  | 'scream' // Freddy jumped out.
+  | 'scream-burned' // A pause during the scream burned the damage done since.
+  | 'scream-survived' // Enough reps without a pause: the scream is over.
+  | 'crystal' // An End crystal broke.
+  | 'covered'; // A short set: the Titans covered Robin, damage undone.
 
 export interface RepOutcome {
   next: ArenaState;
   damage: number;
   isCrit: boolean;
   bossDefeated: boolean;
+  /** A boss already beaten went down again (a replay); the run moves on, nothing new is won. */
+  bossRebeaten: boolean;
   minionDefeated: boolean;
   /** A minion came back under "Зеркало". */
   revived: boolean;
@@ -79,6 +122,8 @@ export interface RepOutcome {
   healed: number;
   /** Multiplier applied to the rep's XP by "Изматывание". */
   xpFactor: number;
+  /** Ability moments this rep set off, in the order they happened. */
+  events: AbilityEvent[];
 }
 
 export function freshFight(enemyHp: number): FightState {
@@ -93,6 +138,11 @@ export function freshFight(enemyHp: number): FightState {
     revivedIds: [],
     lastStandReps: 0,
     regenAt: null,
+    frozenLeft: 0,
+    retreatUsed: false,
+    screamUsed: false,
+    scream: null,
+    crystalsBroken: 0,
   };
 }
 
@@ -150,6 +200,11 @@ function startEncounter(state: ArenaState, bossIndex: number, step: number, carr
       enemyMaxHp: hp,
       carriedHp: 0,
       lastStandReps: 0,
+      frozenLeft: 0,
+      retreatUsed: false,
+      screamUsed: false,
+      scream: null,
+      crystalsBroken: 0,
     },
   };
 }
@@ -182,6 +237,8 @@ export function resolveArenaRep(
   let enemyHp = regen.state.enemyHp;
   let healed = regen.healed;
 
+  const events: AbilityEvent[] = [];
+
   // --- settle the pause that just ended -------------------------------------------------
   const gap = fight.lastRepAt == null ? 0 : now - fight.lastRepAt;
   const setEnded = fight.lastRepAt == null || gap >= SET_BREAK_MS + perks.breathMs;
@@ -199,7 +256,43 @@ export function resolveArenaRep(
       healed += after - enemyHp;
       enemyHp = after;
     }
+    // "Командная работа": a set that ended too short is covered by the Titans — undone.
+    if (
+      enemy.isBoss &&
+      hasAbility(abilities, 'teamwork') &&
+      fight.setReps < abilityValue(abilities, 'teamwork') &&
+      fight.damageThisSet > 0
+    ) {
+      const after = Math.min(fight.enemyMaxHp, Math.max(enemyHp, fight.hpAtSetStart));
+      if (after > enemyHp) {
+        healed += after - enemyHp;
+        enemyHp = after;
+        events.push('covered');
+      }
+    }
+    // "Скример": a pause before enough reps burns what was done since he jumped out, and the
+    // count starts again — he doesn't go away until you've done it.
+    if (fight.scream && fight.scream.reps < abilityValue(abilities, 'scream')) {
+      const after = Math.min(fight.enemyMaxHp, Math.max(enemyHp, fight.scream.hp));
+      if (after > enemyHp) {
+        healed += after - enemyHp;
+        enemyHp = after;
+        events.push('scream-burned');
+      }
+      fight.scream = { hp: enemyHp, reps: 0 };
+    }
     fight.lastStandReps = 0;
+  }
+
+  // "Замораживающий луч": a long enough pause and the reps after it are frozen.
+  if (
+    enemy.isBoss &&
+    hasAbility(abilities, 'freezeRay') &&
+    fight.lastRepAt != null &&
+    gap >= FREEZE_PAUSE_MS + perks.breathMs
+  ) {
+    fight.frozenLeft = abilityValue(abilities, 'freezeRay');
+    events.push('frozen');
   }
 
   if (setEnded) {
@@ -223,21 +316,88 @@ export function resolveArenaRep(
     blocked = 'blind-spot';
   } else if (enemy.isBoss && hasAbility(abilities, 'evenOnly') && fight.repsOnEnemy % 2 !== 0) {
     blocked = 'odd-rep';
+  } else if (enemy.isBoss && (fight.frozenLeft ?? 0) > 0) {
+    fight.frozenLeft = (fight.frozenLeft ?? 0) - 1;
+    blocked = 'frozen';
+  } else if (enemy.isBoss && hasAbility(abilities, 'entryFee') && fight.setReps <= abilityValue(abilities, 'entryFee')) {
+    blocked = 'fee';
+  } else if (
+    enemy.isBoss &&
+    hasAbility(abilities, 'strictMom') &&
+    fight.lastRepAt != null &&
+    gap >= abilityValue(abilities, 'strictMom')
+  ) {
+    // Any pause that long, rest or not — she doesn't do breaks. Only the first fight rep is
+    // exempt, since there's nothing before it to have paused after.
+    blocked = 'slacking';
+  } else if (enemy.isBoss && hasAbility(abilities, 'piggyBank') && fight.repsOnEnemy % PIGGY_EVERY === 0) {
+    const max = fight.enemyMaxHp;
+    const after = Math.min(max, enemyHp + Math.max(1, Math.round(max * abilityValue(abilities, 'piggyBank'))));
+    healed += after - enemyHp;
+    enemyHp = after;
+    blocked = 'piggy';
   }
 
   let isCrit = false;
   let damage = 0;
   if (!blocked) {
     isCrit = critLands(abilities, roll < boss.critChance + perks.critBonus);
-    damage = damageDealt(
+    const hit = damageDealt(
       boss.baseDamage * perks.damageMult,
       boss.critMultiplier + perks.critMultBonus,
       isCrit,
       abilities,
       fight.enemyMaxHp > 0 ? enemyHp / fight.enemyMaxHp : 1,
     );
-    enemyHp -= damage;
-    fight.damageThisSet += damage;
+    if (isCrit && enemy.isBoss && hasAbility(abilities, 'jokerCard')) {
+      // "Карта-джокер": the crit is the joke — on you. It heals him instead.
+      const after = Math.min(fight.enemyMaxHp, enemyHp + Math.max(1, Math.round(hit * abilityValue(abilities, 'jokerCard'))));
+      healed += after - enemyHp;
+      enemyHp = after;
+      isCrit = false;
+      blocked = 'joke';
+    } else {
+      damage = hit;
+      // "Кристаллы Края": while any stands, the dragon takes half.
+      if (enemy.isBoss && hasAbility(abilities, 'endCrystals') && (fight.crystalsBroken ?? 0) < END_CRYSTALS) {
+        damage = Math.max(1, Math.round(damage * CRYSTAL_SHIELD));
+      }
+      enemyHp -= damage;
+      fight.damageThisSet += damage;
+    }
+  }
+
+  // --- reps without a pause: what crystals and the scream are counting -------------------
+  if (
+    enemy.isBoss &&
+    hasAbility(abilities, 'endCrystals') &&
+    (fight.crystalsBroken ?? 0) < END_CRYSTALS &&
+    fight.setReps % CRYSTAL_REPS === 0
+  ) {
+    fight.crystalsBroken = (fight.crystalsBroken ?? 0) + 1;
+    events.push('crystal');
+  }
+  if (fight.scream) {
+    const reps = fight.scream.reps + 1;
+    if (reps >= abilityValue(abilities, 'scream')) {
+      fight.scream = null;
+      events.push('scream-survived');
+    } else fight.scream = { ...fight.scream, reps };
+  }
+
+  // --- below half: Skipper falls back, Freddy jumps out -----------------------------------
+  const belowHalf = enemyHp > 0 && fight.enemyMaxHp > 0 && enemyHp < fight.enemyMaxHp * HALF_HP;
+  if (belowHalf && enemy.isBoss && hasAbility(abilities, 'retreat') && !fight.retreatUsed) {
+    const after = Math.min(fight.enemyMaxHp, enemyHp + Math.round(fight.enemyMaxHp * abilityValue(abilities, 'retreat')));
+    healed += after - enemyHp;
+    enemyHp = after;
+    fight.retreatUsed = true;
+    events.push('retreat');
+  }
+  if (belowHalf && enemy.isBoss && hasAbility(abilities, 'scream') && !fight.screamUsed) {
+    fight.screamUsed = true;
+    fight.scream = { hp: enemyHp, reps: 0 };
+    events.push('scream');
   }
 
   // --- "Заражение": a minion that outlives its welcome leaks HP into the next one ---------
@@ -252,6 +412,7 @@ export function resolveArenaRep(
 
   // --- death, or the refusal to die ------------------------------------------------------
   let bossDefeated = false;
+  let bossRebeaten = false;
   let minionDefeated = false;
   let revived = false;
   let bossReached = false;
@@ -270,6 +431,7 @@ export function resolveArenaRep(
           damage,
           isCrit,
           bossDefeated: false,
+          bossRebeaten: false,
           minionDefeated: false,
           revived: false,
           bossReached: false,
@@ -277,6 +439,7 @@ export function resolveArenaRep(
           blocked,
           healed,
           xpFactor: xpMultiplier(abilities),
+          events,
         };
       }
     }
@@ -322,7 +485,15 @@ export function resolveArenaRep(
           fight: { ...freshFight(hp), lastRepAt: now },
         };
       }
+    } else if (bossIndex < BOSSES.length - 1) {
+      // Beaten before — a replay walking the stages again. He goes down, the list of victories
+      // doesn't change, and the run carries on to the next stage's first minion.
+      bossRebeaten = true;
+      const hp = encounterAt(BOSSES[bossIndex + 1], 0).hp;
+      next = { ...next, bossIndex: bossIndex + 1, stageStep: 0, enemyHp: hp, fight: { ...freshFight(hp), lastRepAt: now } };
     } else {
+      // The last boss, beaten before: the arena has nowhere further to go.
+      bossRebeaten = true;
       next = { ...next, enemyHp: 0, fight };
     }
   }
@@ -332,6 +503,7 @@ export function resolveArenaRep(
     damage,
     isCrit,
     bossDefeated,
+    bossRebeaten,
     minionDefeated,
     revived,
     bossReached,
@@ -339,5 +511,6 @@ export function resolveArenaRep(
     blocked,
     healed,
     xpFactor: xpMultiplier(abilities),
+    events,
   };
 }

@@ -146,7 +146,7 @@ export function Heartbeat({
 /* ----------------------------- cardiogram ------------------------------ */
 
 /** A live trace beside the hearts: the same rhythm, but as a line you can read. */
-export function PulseTrace({ pct }: { pct: number }) {
+export function PulseTrace({ pct, className = 'h-11' }: { pct: number; className?: string }) {
   const health = clamp01(pct / 100);
   const strain = 1 - health;
   const flat = pct <= 0;
@@ -167,7 +167,7 @@ export function PulseTrace({ pct }: { pct: number }) {
     // Tall enough for the box to be worth filling. The waveform is drawn into 40 units of
     // height and stretched to whatever this is, so a short strip squashed a spike that on
     // paper reached the ceiling down into a few pixels of twitch.
-    <span className="relative mx-auto block h-11 w-full max-w-sm overflow-hidden" aria-hidden>
+    <span className={`relative mx-auto block w-full max-w-sm overflow-hidden ${className}`} aria-hidden>
       <motion.svg
         viewBox={`0 0 ${span} 40`}
         preserveAspectRatio="none"

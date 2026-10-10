@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { HitSound } from '../data/bosses';
+import type { BossLine as Line, HitSound } from '../data/bosses';
 import {
   installAudioUnlock,
   loadFeedbackPrefs,
   playBossDefeat,
   playBossEncounter,
   playLevelUp,
+  playRankUp,
   playPurchase,
   playRep,
   playRushEnd,
@@ -39,8 +40,9 @@ export function useFeedback() {
       /** `sound` lets a stage ask for its own rep cue; left out, the ordinary beep plays. */
       rep: (crit = false, sound?: HitSound) => playRep(prefs, crit, sound),
       bossDefeat: () => playBossDefeat(prefs),
-      bossEncounter: () => playBossEncounter(prefs),
+      bossEncounter: (line?: Line) => playBossEncounter(prefs, line),
       levelUp: () => playLevelUp(prefs),
+      rankUp: () => playRankUp(prefs),
       rushEnd: () => playRushEnd(prefs),
       purchase: () => playPurchase(prefs),
     }),

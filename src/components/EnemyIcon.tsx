@@ -53,6 +53,8 @@ export function EnemyIcon({
   className,
   bare = false,
   ratio = 1,
+  maxShape,
+  hug = false,
 }: {
   file: string;
   color: string;
@@ -76,6 +78,17 @@ export function EnemyIcon({
    * square box throws away the head — which is the part worth showing.
    */
   ratio?: number;
+  /**
+   * The widest the shown frame may be, as width over height. A picture wider than this loses a
+   * little off each side — its figure stands in the middle, and on a narrow phone screen the
+   * edges of a wide scene cost the figure its size.
+   */
+  maxShape?: number;
+  /**
+   * The outer box takes the fitted picture's height instead of reserving the full slot, so
+   * whatever comes next sits right under the picture.
+   */
+  hug?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   /** The picture's own proportions, once the browser has them. */
@@ -99,8 +112,9 @@ export function EnemyIcon({
   // shrink the figure for no reason. The slot's height is the other limit, and the outer box
   // keeps its reserved size either way, so nothing below moves about.
   const room = Math.max(size, maxWidth ?? size);
-  const fitW = bare && shape ? Math.min(room, height * shape) : size;
-  const fitH = bare && shape ? Math.round(fitW / shape) : height;
+  const frame = shape && maxShape ? Math.min(shape, maxShape) : shape;
+  const fitW = bare && frame ? Math.min(room, height * frame) : size;
+  const fitH = bare && frame ? Math.round(fitW / frame) : height;
   const w = Math.round(fitW);
 
   const img = (
@@ -160,7 +174,7 @@ export function EnemyIcon({
     // so nothing below it moves when the image finally loads.
     <span
       className={`relative flex shrink-0 items-center justify-center ${className ?? ''}`}
-      style={{ width: Math.max(size, w), height }}
+      style={{ width: hug && shape ? w : Math.max(size, w), height: hug && shape ? fitH : height }}
     >
       <span className="relative block" style={{ width: w, height: fitH }}>
         {img}

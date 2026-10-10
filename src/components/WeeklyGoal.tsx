@@ -48,6 +48,10 @@ export function WeeklyGoal({
   const done = log ? repsThisWeek(log, now) : 0;
   const pct = Math.min(1, done / goal);
   const paid = profile.weeklyRewardWeek === weekKey(now);
+  // "Done" is about the goal as it stands now. Raising it after the week's reward was paid makes
+  // the week unfinished again — the reward stays paid, but the card mustn't claim the new goal
+  // is met.
+  const met = done >= goal;
   const left = daysLeftInWeek(now);
   const today = log ? repsToday(log, now) : 0;
   const autoDay = dailyTarget(goal, done - today, now);
@@ -60,11 +64,11 @@ export function WeeklyGoal({
       <div className="flex items-center gap-4">
         <div className="relative h-[84px] w-[84px] shrink-0">
           <svg viewBox="0 0 84 84" className="h-full w-full -rotate-90">
-            <Ring r={R_WEEK} pct={pct} color={paid ? 'var(--color-arena-amber)' : 'var(--color-arena-amber-dim)'} calm={calm} />
+            <Ring r={R_WEEK} pct={pct} color={met ? 'var(--color-arena-amber)' : 'var(--color-arena-amber-dim)'} calm={calm} />
             <Ring r={R_DAY} pct={dayPct} color={dayDone ? '#fb7185' : '#e11d48'} calm={calm} delay={0.15} />
           </svg>
           <span className="absolute inset-0 flex items-center justify-center text-arena-amber">
-            {paid ? <Check size={20} strokeWidth={3} /> : <Target size={18} />}
+            {met ? <Check size={20} strokeWidth={3} /> : <Target size={18} />}
           </span>
         </div>
 
@@ -100,11 +104,13 @@ export function WeeklyGoal({
             </p>
           </div>
           <p className="text-[11px] leading-snug text-arena-text-dim">
-            {paid
-              ? `Выполнено! +${weeklyBonusXp(goal)} XP уже твои`
-              : `ещё ${goal - done > 0 ? goal - done : 0} · ${
+            {met && paid
+              ? `Выполнено! Награда недели уже твоя`
+              : met
+                ? 'Выполнено!'
+                : `ещё ${goal - done} · ${
                   left === 0 ? 'сегодня последний день' : `${left} ${plural(left, 'день', 'дня', 'дней')} до конца недели`
-                } · награда +${weeklyBonusXp(goal)} XP`}
+                }${paid ? ' · награда этой недели уже получена' : ` · награда +${weeklyBonusXp(goal)} XP`}`}
           </p>
         </div>
       </div>

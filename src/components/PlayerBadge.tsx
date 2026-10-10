@@ -1,3 +1,4 @@
+import { getRank, glows } from '../data/ranks';
 import clsx from 'clsx';
 
 /**
@@ -26,14 +27,18 @@ export function Avatar({
   name,
   size = 'sm',
   className,
+  level,
 }: {
   name: string;
   size?: keyof typeof SIZES;
   className?: string;
+  /** Wears the frame of this level's title (see src/data/ranks.ts), when given. */
+  level?: number;
 }) {
   const trimmed = name.trim();
   const hue = hueOf(trimmed.toLowerCase());
-  return (
+  const rank = level != null ? getRank(level) : null;
+  const avatar = (
     <span
       aria-hidden
       className={clsx(
@@ -48,6 +53,26 @@ export function Avatar({
       }}
     >
       {trimmed.slice(0, 1) || '?'}
+    </span>
+  );
+  if (!rank) return avatar;
+  // The title's frame: a ring in its colour, glowing from Легенда up; Бессмертный wears a crown.
+  return (
+    <span className="relative inline-flex shrink-0">
+      <span
+        className="rounded-full p-[2px]"
+        style={{
+          background: rank.color,
+          boxShadow: glows(rank) ? `0 0 10px ${rank.color}, 0 0 2px ${rank.color}` : undefined,
+        }}
+      >
+        {avatar}
+      </span>
+      {rank.minLevel >= 95 && (
+        <span aria-hidden className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-[11px] leading-none">
+          👑
+        </span>
+      )}
     </span>
   );
 }

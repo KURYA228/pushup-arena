@@ -81,3 +81,14 @@ body {
     max-width: 68rem;
   }
 }
+
+/* The legionary's push-up: a strip of frames slid past one frame-wide window. `jump-none`
+   lands on both ends, so with N steps every one of the N frames gets its turn. */
+@keyframes legionary-pushup {
+  from {
+    background-position: 0% 0;
+  }
+  to {
+    background-position: 100% 0;
+  }
+}

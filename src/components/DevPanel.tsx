@@ -23,6 +23,11 @@ const dayStart = (now: number) => {
   return d.getTime();
 };
 import { forgetIntro } from '../lib/intro';
+import { RANKS, STRENGTH, getRank, leagueFor, strengthFor, LEAGUES } from '../data/ranks';
+import { announceRankUps } from '../lib/rankEvents';
+import { weekRepsNow } from '../lib/training';
+import { weekKey } from '../lib/weekly';
+import { resetBriefed } from './BossBriefing';
 
 /**
  * Debug controls for jumping around the game state without grinding reps. Writes go through the
@@ -174,6 +179,123 @@ export function DevPanel({
             max={300}
             onApply={(v) => void patch({ totalXp: totalXpForLevel(v) })}
           />
+        </Group>
+
+        <Group
+          title={`Ранги — ${getRank(level).name} · ${leagueFor(weekRepsNow(profile, Date.now())).name} · ${strengthFor(profile.bestSet ?? 0).name}`}
+        >
+          <p className="text-[10px] text-arena-text-dim">Звание — прыжок на уровень, с которого оно начинается:</p>
+          <div className="flex flex-wrap gap-1">
+            {RANKS.map((r) => (
+              <button
+                key={r.name}
+                onClick={() => void patch({ totalXp: totalXpForLevel(r.minLevel) })}
+                className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium active:scale-95 ${
+                  getRank(level) === r ? 'bg-arena-amber/20 text-arena-amber' : 'bg-arena-surface-2 text-arena-text-dim'
+                }`}
+              >
+                {r.icon} {r.name}
+              </button>
+            ))}
+          </div>
+          <NumberField
+            label="отжиманий за неделю (лига)"
+            value={weekRepsNow(profile, Date.now())}
+            min={0}
+            max={99999}
+            onApply={(v) => void patch({ weekReps: { week: weekKey(Date.now()), count: v } })}
+          />
+          <NumberField
+            label="лучший подход (сила)"
+            value={profile.bestSet ?? 0}
+            min={0}
+            max={9999}
+            onApply={(v) => void patch({ bestSet: v, setRun: undefined })}
+          />
+          <p className="text-[10px] text-arena-text-dim">Показать экран повышения:</p>
+          <Row>
+            <Action
+              onClick={() => {
+                const r = getRank(level);
+                announceRankUps([{ kind: 'level', name: r.name, icon: r.icon, color: r.color }]);
+                onClose();
+              }}
+            >
+              Звание
+            </Action>
+            <Action
+              onClick={() => {
+                const l = leagueFor(weekRepsNow(profile, Date.now()));
+                announceRankUps([{ kind: 'league', name: l.name, icon: l.tier.icon, color: l.tier.color }]);
+                onClose();
+              }}
+            >
+              Лига
+            </Action>
+            <Action
+              onClick={() => {
+                const st = strengthFor(profile.bestSet ?? 0);
+                const show = st.min > 0 ? st : STRENGTH[1];
+                announceRankUps([{ kind: 'strength', name: show.name, icon: show.icon, color: show.color }]);
+                onClose();
+              }}
+            >
+              Сила
+            </Action>
+          </Row>
+          <p className="text-[10px] leading-snug text-arena-text-dim">
+            Пороги лиг: {LEAGUES.map((l) => `${l.name} ${l.min}`).join(', ')}. Сила: {STRENGTH.slice(1).map((t) => `${t.name} ${t.min}`).join(', ')}.
+          </p>
+        </Group>
+
+        <Group title={`Бой — HP врага ${profile.enemyHp}${profile.replay ? ' · идёт реванш' : ''}`}>
+          <NumberField
+            label="HP врага"
+            value={profile.enemyHp}
+            min={1}
+            max={99999}
+            onApply={(v) => void patch({ enemyHp: v })}
+          />
+          <Row>
+            <Action
+              onClick={() =>
+                void patch({
+                  fight: {
+                    ...profile.fight,
+                    frozenLeft: 0,
+                    retreatUsed: false,
+                    screamUsed: false,
+                    scream: null,
+                    crystalsBroken: 0,
+                    lastRepAt: null,
+                    setReps: 0,
+                    repsOnEnemy: 0,
+                  },
+                })
+              }
+            >
+              Сбросить способности
+            </Action>
+            <Action onClick={resetBriefed}>Разведку — заново</Action>
+          </Row>
+          {profile.replay && (
+            <Row>
+              <Action
+                onClick={() => {
+                  const back = profile.replay?.returnTo;
+                  if (!back) return;
+                  void patch({ ...back, replay: null });
+                }}
+              >
+                Выйти из реванша
+              </Action>
+            </Row>
+          )}
+          <p className="text-[10px] leading-snug text-arena-text-dim">
+            HP — чтобы проверить то, что срабатывает на половине здоровья (Шкипер, Фредди).
+            «Сбросить способности» — кристаллы, заморозка, скример, отступление и счёт повторов боя
+            с нуля. «Разведку — заново» — досье на каждого босса снова всплывёт само.
+          </p>
         </Group>
 
         <Group title="Счётчики">

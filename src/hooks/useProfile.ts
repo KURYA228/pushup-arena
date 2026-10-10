@@ -3,6 +3,10 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, PROFILE_ID } from '../db/db';
 import type { ProfileRecord, RepLogEntry, RepResult, RepUndo } from '../types';
 import { RUSH_XP_PER_REP, XP_PER_REP, levelFromTotalXp, streakMultiplier } from '../data/leveling';
+import { rankUpsBetween, type RankUp } from '../data/ranks';
+import { advanceTraining, weekRepsNow, type Training } from '../lib/training';
+import { announceRankUps } from '../lib/rankEvents';
+import { readIntroAbout } from '../lib/intro';
 import { getRank } from '../data/ranks';
 import {
   BOSSES,
@@ -68,7 +72,9 @@ async function ensureProfile(): Promise<ProfileRecord> {
   // The sync mark goes with it: it records an agreement with the server about numbers that no
   // longer exist, and leaving it behind would make the next sync draw conclusions from it.
   if (existing) clearMark();
-  const fresh = defaultProfile();
+  // What the intro learned may have been said before this row existed.
+  const about = readIntroAbout();
+  const fresh: ProfileRecord = about ? { ...defaultProfile(), nickname: about.nickname, age: about.age } : defaultProfile();
   await db.transaction('rw', db.profile, db.reps, async () => {
     await db.profile.put(fresh);
     await db.reps.clear();
@@ -81,11 +87,15 @@ async function ensureProfile(): Promise<ProfileRecord> {
  * disagree with the totals. Returns the log row's id for undo.
  */
 async function commitRep(
-  updated: ProfileRecord,
+  before: ProfileRecord,
+  updatedIn: ProfileRecord,
   entry: Omit<RepLogEntry, 'id' | 'season'>,
-): Promise<{ logId: number; weeklyBonus: number; totalXp: number }> {
+): Promise<{ logId: number; weeklyBonus: number; totalXp: number; rankUps: RankUp[] }> {
   return db.transaction('rw', db.profile, db.reps, async () => {
     const logId = (await db.reps.add({ ...entry, season: SEASON })) as number;
+    // The running numbers the league and strength ranks read: this week's count, the current
+    // set, the best set ever.
+    const updated: ProfileRecord = { ...updatedIn, ...advanceTraining(before, entry.at) };
     // The weekly goal pays once per week, on the rep that reaches it. Counted from the log,
     // which already holds this rep.
     let weeklyBonus = 0;
@@ -104,9 +114,19 @@ async function commitRep(
       }
     }
     await db.profile.put(saved);
-    return { logId, weeklyBonus, totalXp: saved.totalXp };
+    const rankUps = rankUpsBetween(
+      { level: levelFromTotalXp(before.totalXp).level, weekReps: weekRepsNow(before, entry.at), bestSet: before.bestSet ?? 0 },
+      { level: levelFromTotalXp(saved.totalXp).level, weekReps: weekRepsNow(saved, entry.at), bestSet: saved.bestSet ?? 0 },
+    );
+    return { logId, weeklyBonus, totalXp: saved.totalXp, rankUps };
   });
 }
+
+const trainingSnapshot = (p: ProfileRecord): Training => ({
+  weekReps: p.weekReps,
+  setRun: p.setRun,
+  bestSet: p.bestSet,
+});
 
 /**
  * One press of «+» (or −1 to take one back). Only the clicker moves — see `clickerTaps`.
@@ -138,8 +158,10 @@ export function useProfile() {
     const boss = BOSSES[bossIndex];
     const stageStep = profile.stageStep ?? BOSS_STEP;
     const enemy = encounterAt(boss, stageStep);
-    const allBossesDefeated = profile.bossesDefeated.length >= BOSSES.length;
-    return { ...levelInfo, rank, boss, bossIndex, stageStep, enemy, allBossesDefeated };
+    // A rematch reopens the arena even once every boss is down.
+    const replaying = Boolean(profile.replay);
+    const allBossesDefeated = profile.bossesDefeated.length >= BOSSES.length && !replaying;
+    return { ...levelInfo, rank, boss, bossIndex, stageStep, enemy, allBossesDefeated, replaying };
   }, [profile]);
 
   /**
@@ -186,11 +208,28 @@ export function useProfile() {
       bossesDefeated: outcome.next.bossesDefeated,
       fight: outcome.next.fight,
     };
+    // A replay walks the stages again from the one chosen — minions, boss, next stage — and ends
+    // when it catches up: the moment it reaches the stage the real progress was on, that progress
+    // comes back exactly as it was left (the same minion, the same HP). Beating the last boss
+    // again ends it too, there being nowhere further to walk.
+    const replayWon =
+      Boolean(p.replay) &&
+      outcome.bossRebeaten &&
+      (outcome.next.bossIndex === p.replay?.returnTo.currentBossIndex || bossIndex >= BOSSES.length - 1);
+    if (replayWon && p.replay) {
+      Object.assign(updated, {
+        currentBossIndex: p.replay.returnTo.currentBossIndex,
+        stageStep: p.replay.returnTo.stageStep,
+        enemyHp: p.replay.returnTo.enemyHp,
+        fight: p.replay.returnTo.fight,
+        replay: null,
+      });
+    }
     const newAchievements = checkNewAchievements(updated);
     if (newAchievements.length) {
       updated.achievementsUnlocked = [...updated.achievementsUnlocked, ...newAchievements];
     }
-    const { logId, weeklyBonus, totalXp: finalXp } = await commitRep(updated, {
+    const { logId, weeklyBonus, totalXp: finalXp, rankUps } = await commitRep(p, updated, {
       at: Date.now(),
       mode: 'arena',
       bossIndex,
@@ -198,6 +237,7 @@ export function useProfile() {
       damage: outcome.damage,
       crit: outcome.isCrit,
     });
+    announceRankUps(rankUps);
 
     const afterLevel = levelFromTotalXp(finalXp).level;
     return {
@@ -210,7 +250,11 @@ export function useProfile() {
       minionDefeated: outcome.minionDefeated,
       revived: outcome.revived,
       bossReached: outcome.bossReached,
+      bossRebeaten: outcome.bossRebeaten,
+      replayWon,
+      rankUps,
       blocked: outcome.blocked,
+      events: outcome.events,
       healed: outcome.healed,
       enemyName: outcome.enemyName,
       newAchievements,
@@ -225,8 +269,10 @@ export function useProfile() {
         stageStepBefore: p.stageStep,
         fightBefore: p.fight,
         bossIdDefeated: outcome.bossDefeated ? boss.id : null,
+        replayBefore: p.replay ?? null,
         achievementsGranted: newAchievements,
         streakBefore: streakSnapshot(p),
+        trainingBefore: trainingSnapshot(p),
         logId,
       },
     };
@@ -251,7 +297,7 @@ export function useProfile() {
     if (newAchievements.length) {
       updated.achievementsUnlocked = [...updated.achievementsUnlocked, ...newAchievements];
     }
-    const { logId, weeklyBonus, totalXp: finalXp } = await commitRep(updated, {
+    const { logId, weeklyBonus, totalXp: finalXp, rankUps } = await commitRep(p, updated, {
       at: Date.now(),
       mode: 'rush',
       bossIndex: null,
@@ -259,6 +305,7 @@ export function useProfile() {
       damage: 0,
       crit: false,
     });
+    announceRankUps(rankUps);
     const afterLevel = levelFromTotalXp(finalXp).level;
     return {
       xpGained: xpGained + weeklyBonus,
@@ -270,7 +317,11 @@ export function useProfile() {
       minionDefeated: false,
       revived: false,
       bossReached: false,
+      bossRebeaten: false,
+      replayWon: false,
+      rankUps,
       blocked: null,
+      events: [],
       healed: 0,
       enemyName: '',
       newAchievements,
@@ -287,6 +338,7 @@ export function useProfile() {
         bossIdDefeated: null,
         achievementsGranted: newAchievements,
         streakBefore: streakSnapshot(p),
+        trainingBefore: trainingSnapshot(p),
         logId,
       },
     };
@@ -349,6 +401,8 @@ export function useProfile() {
       // Undo pops in reverse order, so the snapshot from this rep is exactly the state before it
       // — including a freeze it spent or earned.
       ...undo.streakBefore,
+      // The week's count and the sets go back too, so a mis-counted rep doesn't keep its credit.
+      ...(undo.trainingBefore ?? {}),
       // If this rep paid the weekly goal, taking it back un-pays it (its XP is in `undo.xp`).
       weeklyRewardWeek: undo.weeklyRewardWeekBefore,
       achievementsUnlocked: undo.achievementsGranted.length
@@ -363,10 +417,57 @@ export function useProfile() {
       if (undo.bossIdDefeated) {
         updated.bossesDefeated = p.bossesDefeated.filter((id) => id !== undo.bossIdDefeated);
       }
+      // Taking back the rep that won a rematch puts you back in it.
+      if (undo.replayBefore !== undefined) updated.replay = undo.replayBefore;
     }
     await db.transaction('rw', db.profile, db.reps, async () => {
       await db.profile.put(updated);
       if (undo.logId != null) await db.reps.delete(undo.logId);
+    });
+  }, []);
+
+  /**
+   * Plays a beaten stage again, from its first minion, and on through the stages after it in
+   * order. The real progress is put aside and comes back when the run catches up with it, or
+   * when you leave (see `endReplay`). Refused while another replay is on, or for a boss not yet
+   * beaten.
+   */
+  const startReplay = useCallback(async (bossIndex: number): Promise<boolean> => {
+    return db.transaction('rw', db.profile, async () => {
+      const p = await ensureProfile();
+      const boss = BOSSES[bossIndex];
+      if (!boss || p.replay || !p.bossesDefeated.includes(boss.id)) return false;
+      const hp = encounterAt(boss, 0).hp;
+      await db.profile.put({
+        ...p,
+        replay: {
+          bossIndex,
+          startedAt: Date.now(),
+          returnTo: { currentBossIndex: p.currentBossIndex, stageStep: p.stageStep, enemyHp: p.enemyHp, fight: p.fight },
+        },
+        currentBossIndex: bossIndex,
+        stageStep: 0,
+        enemyHp: hp,
+        fight: freshFight(hp),
+      });
+      return true;
+    });
+  }, []);
+
+  /** Walks out of a rematch: the real progress comes back as it was left. */
+  const endReplay = useCallback(async () => {
+    await db.transaction('rw', db.profile, async () => {
+      const p = await ensureProfile();
+      if (!p.replay) return;
+      const back = p.replay.returnTo;
+      await db.profile.put({
+        ...p,
+        currentBossIndex: back.currentBossIndex,
+        stageStep: back.stageStep,
+        enemyHp: back.enemyHp,
+        fight: back.fight,
+        replay: null,
+      });
     });
   }, []);
 
@@ -443,6 +544,8 @@ export function useProfile() {
     derived,
     registerBossRep,
     registerRushRep,
+    startReplay,
+    endReplay,
     finishRush,
     tickArena,
     revertRep,

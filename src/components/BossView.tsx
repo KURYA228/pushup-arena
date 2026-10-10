@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion, useAnimationControls } from 'framer-motion';
+import { AnimatePresence, motion, useAnimationControls, useMotionValue, useReducedMotion } from 'framer-motion';
 import type { ProfileRecord, RepResult, RepUndo, ToastKind } from '../types';
 import type { useProfile } from '../hooks/useProfile';
 import type { Feedback } from '../hooks/useFeedback';
 import { ACHIEVEMENTS } from '../data/achievements';
-import { BOSSES, stageProgressLabel } from '../data/bosses';
+import { BOSSES, stageProgressLabel, type BossDef } from '../data/bosses';
 import { abilityName, describeAbility, hasAbility } from '../data/abilities';
 import { BossIcon } from './BossIcon';
+import { BossTalk } from './BossTalk';
+import { BossBriefing, markBriefed, wasBriefed } from './BossBriefing';
+import { AbilityStamp, AbilityStatus, FrostOverlay } from './AbilityFx';
+import type { AbilityEvent } from '../data/combat';
 import { BossIntro } from './BossIntro';
 import { BOSS_INTRO_SEC } from '../lib/bossCut';
 import { EnemyIcon } from './EnemyIcon';
@@ -15,10 +19,12 @@ import { Heartbeat, PulseTrace } from './Heartbeat';
 import { BOSS_HEARTS, MINION_HEARTS } from '../lib/vitals';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { CameraPanel } from './CameraPanel';
-import { Camera } from 'lucide-react';
+import { Camera, Search, Zap } from 'lucide-react';
+import clsx from 'clsx';
 import { HintCard } from './HintCard';
 import { useHint } from '../lib/hints';
 import { streakNotices } from '../lib/streak';
+import { bossLineLevel, preloadBossCues } from '../lib/feedback';
 
 type Derived = NonNullable<ReturnType<typeof useProfile>['derived']>;
 
@@ -39,8 +45,19 @@ const ART_RATIO = 1.12;
  * whatever is left, because a laptop at 800px tall has *less* room than a phone, and a fixed
  * size pushed the plus button below the fold there.
  */
-const CHROME_PX = 486;
+// Measured with the hand counter below, the shorter of the two: the stage card, the pulse, the
+// health bar, the mode switch, the counter and the tab bar, with a little to spare. The camera
+// panel is taller, so in camera mode the page scrolls a little — the boss stays on screen,
+// which is what you look at from the floor.
+const CHROME_PX = 432;
 const ART_MIN = 180;
+/** The name and the line under it (the title, with the boss's ability chips), below the picture. */
+const NAME_PX = 62;
+/**
+ * The widest the fight artwork is shown, width over height. The sheets are wide scenes with the
+ * figure in the middle; trimming their sides makes the figure itself bigger on a phone.
+ */
+const ART_MAX_SHAPE = 1.15;
 
 export function BossView({
   profile,
@@ -50,6 +67,7 @@ export function BossView({
   tickArena,
   feedback,
   notify,
+  endReplay,
 }: {
   profile: ProfileRecord;
   derived: Derived;
@@ -58,14 +76,95 @@ export function BossView({
   tickArena: () => Promise<number>;
   feedback: Feedback;
   notify: (kind: ToastKind, title: string, description?: string) => void;
+  /** Leaves a rematch; the real progress comes back. */
+  endReplay: () => Promise<void>;
 }) {
   const [pops, setPops] = useState<DamagePop[]>([]);
   const [shake, setShake] = useState(false);
-  const [flash, setFlash] = useState<'win' | null>(null);
+  const [flash, setFlash] = useState<'win' | 'scream' | null>(null);
+  /** The ability moment on screen right now, if any — see AbilityFx. */
+  const [stamp, setStamp] = useState<{ id: number; event: AbilityEvent } | null>(null);
+  /**
+   * The scouting report on this stage's boss. Every time the third minion falls — beaten before
+   * or not, on a replay too — the boss walks out first (the "BOSS" cut, the call, his line) and
+   * the report comes up once he's said his piece. Also on request from the stage card, and once
+   * on its own if you land on a boss some other way (below).
+   */
+  const [briefing, setBriefing] = useState(false);
+  /** A report waiting for the boss to finish his entrance. */
+  const briefAfterEntrance = useRef(false);
+  // Arriving some other way — a reload, a jump from the dev panel — there's no entrance to wait
+  // for, so the report just comes up on its own. Checked when the timer fires: the new boss can
+  // show up a moment before the rep that brought him has flagged his entrance.
+  const bossUp = !derived.allBossesDefeated && derived.enemy.isBoss;
+  // His entrance cues, fetched while you're still on his minions — and again after the first tap
+  // of a session, which is when audio becomes available at all.
+  useEffect(() => {
+    preloadBossCues(derived.boss.line);
+    const again = () => preloadBossCues(derived.boss.line);
+    window.addEventListener('pointerdown', again, { once: true });
+    return () => window.removeEventListener('pointerdown', again);
+  }, [derived.boss.line]);
+  useEffect(() => {
+    if (!bossUp || wasBriefed(derived.boss.id)) return;
+    const id = window.setTimeout(() => {
+      if (!briefAfterEntrance.current) setBriefing(true);
+    }, 600);
+    return () => window.clearTimeout(id);
+  }, [bossUp, derived.boss.id]);
+  const closeBriefing = () => {
+    markBriefed(derived.boss.id);
+    setBriefing(false);
+  };
   const [impact, setImpact] = useState<'hit' | 'crit' | null>(null);
   /** The dark-and-"BOSS" cut, shown once the third minion falls. */
   const [bossIntro, setBossIntro] = useState(false);
+  /** Which ability chip under the boss's name has its description open. */
+  const [openAbility, setOpenAbility] = useState<string | null>(null);
+  // A new boss closes whatever the last one had open.
+  useEffect(() => setOpenAbility(null), [derived.boss.id]);
   const enemyControls = useAnimationControls();
+  const calm = useReducedMotion();
+  /**
+   * The boss "talking": the loudness of his line, read every frame while it plays, for
+   * `BossTalk` to move him with — so he moves with what he actually says, pauses included.
+   */
+  const talk = useMotionValue(0);
+  const [talking, setTalking] = useState(false);
+  useEffect(() => {
+    if (!talking || calm) return;
+    let raf = 0;
+    let smooth = 0;
+    let started = false;
+    const since = performance.now();
+    const tick = () => {
+      const level = bossLineLevel();
+      if (level === null) {
+        // Null is either "finished" or "not scheduled yet" — the file can still be loading
+        // when the boss walks out. Before it has started, give it a few seconds; after, settle
+        // back to rest and stop.
+        smooth *= 0.85;
+        talk.set(smooth);
+        const gaveUp = !started && performance.now() - since > 5000;
+        if ((started && smooth < 0.01) || gaveUp) {
+          talk.set(0);
+          setTalking(false);
+          return;
+        }
+      } else {
+        if (level > 0) started = true;
+        // Quick to rise, slower to fall — how a mouth looks, more or less.
+        smooth += (level - smooth) * (level > smooth ? 0.5 : 0.15);
+        talk.set(smooth);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      talk.set(0);
+    };
+  }, [talking, calm, talk]);
   const [fightHint, dismissFightHint] = useHint('fight');
   const wide = useMediaQuery('(min-width: 768px)');
 
@@ -79,16 +178,21 @@ export function BossView({
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+  // The name and the title line sit under the picture, so they come out of the height the
+  // picture may take.
+  const namePx = NAME_PX;
   const artWidth = Math.max(
     ART_MIN,
-    Math.round(Math.min(wide ? 420 : 320, (viewport.h - CHROME_PX) / ART_RATIO)),
+    Math.round(Math.min(wide ? 420 : 320, (viewport.h - CHROME_PX - namePx) / ART_RATIO)),
   );
   /**
    * How wide the artwork is allowed to get when the picture itself is a wide one. The column
    * minus its gutters — a landscape illustration held to the portrait width would be shrunk
    * for no reason, since its height is what's cheap.
    */
-  const artRoom = Math.min(viewport.w - 32, wide ? 560 : 400);
+  // Edge to edge on a phone: the picture's own edges are feathered into the background, so it
+  // needs no gutter of its own.
+  const artRoom = Math.min(viewport.w, wide ? 560 : 400);
   // A stack, not a single slot: you can add ten reps by hand, so you must be able to take ten
   // back. The old single-slot version undid exactly one press and then silently did nothing.
   const undoStackRef = useRef<RepUndo[]>([]);
@@ -130,12 +234,11 @@ export function BossView({
       // boss played the plain beep, the announcement and the level-up chime on top of each
       // other — three sounds for one event, which just reads as noise.
       if (result.bossReached) {
-        feedback.bossEncounter();
-        // The cut to the boss. Cleared on a timer rather than by the animation, so a tab
-        // backgrounded mid-flourish can't leave the veil hanging over the fight.
-        setBossIntro(true);
-        window.setTimeout(() => setBossIntro(false), BOSS_INTRO_SEC * 1000);
-      } else if (result.bossDefeated || result.minionDefeated) feedback.bossDefeat();
+        playEntrance(boss.line);
+        // First time against him: the scouting report once he's done talking.
+        // Every time he walks out — the first time, again after a loss of the thread, on a replay.
+        briefAfterEntrance.current = true;
+      } else if (result.bossDefeated || result.bossRebeaten || result.minionDefeated) feedback.bossDefeat();
       else if (result.leveledUp) feedback.levelUp();
       // The named cue belongs to the boss himself, not to the three who come first. `enemy`
       // is read from before the rep landed, which is the one being hit — after it, a killing
@@ -147,11 +250,17 @@ export function BossView({
         'blind-spot': 'СЛЕПАЯ ЗОНА',
         'odd-rep': 'НЕ В СЧЁТ',
         'last-stand': 'НЕ УМИРАЕТ!',
+        fee: '🪙 В КАССУ!',
+        piggy: '🐷 ХРЮК! В КОПИЛКУ',
+        frozen: '❄ ЗАМОРОЖЕН',
+        slacking: 'НЕ ОТЛЫНИВАЙ!',
+        joke: '🃏 ХА-ХА, ШУТКА!',
       } as const;
       if (result.blocked) addPop(BLOCKED_TEXT[result.blocked], false);
       else addPop(result.isCrit ? `-${result.damage} КРИТ!` : `-${result.damage}`, result.isCrit);
       if (result.healed > 0) addPop(`+${result.healed} HP`, true);
       if (result.revived) notify('info', 'Он поднялся', 'Зеркало вернуло его с половиной HP');
+      playAbilityEvents(result.events);
       setShake(true);
       window.setTimeout(() => setShake(false), 220);
 
@@ -167,7 +276,15 @@ export function BossView({
         window.setTimeout(() => setImpact(null), result.isCrit ? 320 : 200);
       }
 
-      if (result.bossDefeated) {
+      if (result.replayWon) {
+        setFlash('win');
+        window.setTimeout(() => setFlash(null), 900);
+        notify('boss-defeat', `${result.enemyName} повержен снова!`, 'Ты догнал свой прогресс — дальше как было');
+      } else if (result.bossRebeaten) {
+        setFlash('win');
+        window.setTimeout(() => setFlash(null), 900);
+        notify('boss-defeat', `${result.enemyName} повержен снова!`, 'Дальше — следующий этап');
+      } else if (result.bossDefeated) {
         setFlash('win');
         window.setTimeout(() => setFlash(null), 900);
         notify('boss-defeat', `${result.enemyName} повержен!`, 'Этап пройден — впереди новый');
@@ -187,6 +304,73 @@ export function BossView({
       busyRef.current = false;
     }
   };
+
+  /**
+   * Plays out the moments a rep's abilities set off. The most important one gets the stamp —
+   * a scream beats a crystal beats the rest — and a few get a move of the boss's own on top.
+   */
+  const playAbilityEvents = (events: AbilityEvent[]) => {
+    if (!events.length) return;
+    const ORDER: AbilityEvent[] = ['scream', 'scream-burned', 'scream-survived', 'crystal', 'retreat', 'frozen', 'covered'];
+    const top = ORDER.find((e) => events.includes(e)) ?? events[0];
+    const id = ++popId;
+    setStamp({ id, event: top });
+    window.setTimeout(() => setStamp((cur) => (cur?.id === id ? null : cur)), 1300);
+
+    if (events.includes('scream')) {
+      // The jump-scare: a white-to-red flash, and Freddy lunging at the screen.
+      setFlash('scream');
+      window.setTimeout(() => setFlash(null), 700);
+      void enemyControls.start({
+        scale: [1, 1.55, 1.4, 1],
+        rotate: [0, -4, 4, -3, 0],
+        transition: { duration: 0.7, ease: 'easeOut' },
+      });
+    } else if (events.includes('retreat')) {
+      // Skipper falls back, then steps in again patched up.
+      void enemyControls.start({
+        x: [0, 60, 60, 0],
+        scale: [1, 0.8, 0.8, 1],
+        opacity: [1, 0.5, 0.5, 1],
+        transition: { duration: 1, times: [0, 0.3, 0.7, 1] },
+      });
+    } else if (events.includes('crystal')) {
+      void enemyControls.start({
+        scale: [1, 0.9, 1.06, 1],
+        filter: ['brightness(1)', 'brightness(2.2)', 'brightness(1)'],
+        transition: { duration: 0.5 },
+      });
+    } else if (events.includes('frozen')) {
+      void enemyControls.start({
+        filter: ['hue-rotate(0deg) brightness(1)', 'hue-rotate(160deg) brightness(1.6)', 'hue-rotate(0deg) brightness(1)'],
+        transition: { duration: 0.8 },
+      });
+    }
+  };
+
+  /** The boss walks out: the "BOSS" cut, the call, and his line if he has one. */
+  const playEntrance = (line: BossDef['line']) => {
+    feedback.bossEncounter(line);
+    if (line) setTalking(true);
+    // The cut to the boss. Cleared on a timer rather than by the animation, so a tab
+    // backgrounded mid-flourish can't leave the veil hanging over the fight.
+    setBossIntro(true);
+    window.setTimeout(() => setBossIntro(false), BOSS_INTRO_SEC * 1000);
+  };
+
+  // The report comes once the cut has cleared and he's finished talking — never over his line,
+  // however long it runs. (A boss with no line never starts talking, and a line that can't play
+  // gives up within seconds; under reduced motion nothing tracks the talking, so the cut alone
+  // decides.)
+  useEffect(() => {
+    if (bossIntro || (talking && !calm) || !briefAfterEntrance.current) return;
+    const id = window.setTimeout(() => {
+      if (!briefAfterEntrance.current) return;
+      briefAfterEntrance.current = false;
+      setBriefing(true);
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [bossIntro, talking, calm]);
 
   const handleUndo = async () => {
     if (busyRef.current) return;
@@ -214,14 +398,40 @@ export function BossView({
 
   return (
     <div className="arena-page pb-8 pt-6">
-      <div className="mb-2 flex items-center justify-between text-xs text-arena-text-dim">
-        <span>
-          Этап {derived.bossIndex + 1} / {BOSSES.length}
-        </span>
-        <span>{stageProgressLabel(derived.stageStep)}</span>
-      </div>
+      {/* A rematch says so, with the way out: the real progress waits until he falls or you leave. */}
+      {derived.replaying && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-3 flex items-center justify-between gap-2 rounded-2xl border border-arena-amber/50 bg-arena-amber/10 px-3 py-2"
+        >
+          <span className="text-xs leading-snug text-arena-text">
+            <b className="text-arena-amber">Перепрохождение</b> · твой этап {(profile.replay?.returnTo.currentBossIndex ?? 0) + 1}{' '}
+            ждёт впереди
+          </span>
+          <button
+            onClick={() => void endReplay()}
+            className="shrink-0 rounded-lg bg-arena-surface-2 px-2.5 py-1 text-[11px] font-semibold text-arena-text active:scale-95"
+          >
+            Выйти
+          </button>
+        </motion.div>
+      )}
 
-      <div className="mb-3 rounded-2xl border border-arena-border bg-arena-surface px-3 pb-2 pt-3">
+      {/* Where you are, written into the card's top edge rather than on a line of its own —
+          every line saved here goes to the artwork. */}
+      <div className="relative mb-2 mt-1 rounded-2xl border border-arena-border bg-arena-surface px-3 pb-1.5 pt-2.5">
+        <div className="absolute inset-x-3 -top-2 flex justify-between text-[10px] leading-4 text-arena-text-dim">
+          {/* Doubles as the way back into the scouting report. */}
+          <button
+            type="button"
+            onClick={() => setBriefing(true)}
+            className="pointer-events-auto flex items-center gap-1 rounded bg-arena-bg px-1.5 font-semibold text-arena-amber active:scale-95"
+          >
+            Этап {derived.bossIndex + 1} / {BOSSES.length} · <Search size={10} /> разведка
+          </button>
+          <span className="rounded bg-arena-bg px-1.5">{stageProgressLabel(derived.stageStep)}</span>
+        </div>
         <StagePath boss={boss} step={derived.stageStep} color={boss.color} />
       </div>
 
@@ -232,10 +442,19 @@ export function BossView({
       <motion.div
         animate={shake ? { x: [0, -6, 6, -4, 4, 0] } : { x: 0 }}
         transition={{ duration: 0.22 }}
-        className="relative mb-3 mt-1 text-center"
+        className="relative mb-2 text-center"
       >
         {/* Soft washes rather than filled rectangles: with the box gone there are no edges for
             a solid colour to sit inside, so they bloom from the middle instead. */}
+        {flash === 'scream' && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            animate={{ opacity: [1, 0.9, 0], backgroundColor: ['#ffffff', '#ef4444', '#7f1d1d'] }}
+            transition={{ duration: 0.7, times: [0, 0.25, 1] }}
+            className="pointer-events-none fixed inset-0 z-40"
+          />
+        )}
+        <AbilityStamp stamp={stamp} />
         {flash === 'win' && (
           <motion.div
             initial={{ opacity: 0.6 }}
@@ -267,18 +486,23 @@ export function BossView({
             animate={{ opacity: 1, scale: 1, x: 0 }}
             exit={{ opacity: 0, scale: 0.7, rotate: 10, y: 16 }}
             transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-            className="relative flex justify-center"
+            className="relative flex flex-col items-center"
           >
+            {enemy.isBoss && <AbilityStatus boss={boss} fight={profile.fight} />}
             <motion.div animate={enemyControls}>
               {enemy.isBoss ? (
-                <BossIcon
-                  boss={boss}
-                  index={derived.bossIndex}
-                  size={artWidth}
-                  maxWidth={artRoom}
-                  ratio={ART_RATIO}
-                  bare
-                />
+                <BossTalk talk={talk} active={talking} color={boss.color}>
+                  <BossIcon
+                    boss={boss}
+                    index={derived.bossIndex}
+                    size={artWidth}
+                    maxWidth={artRoom}
+                    ratio={ART_RATIO}
+                    maxShape={ART_MAX_SHAPE}
+                    hug
+                    bare
+                  />
+                </BossTalk>
               ) : (
                 <EnemyIcon
                   file={enemy.icon}
@@ -287,22 +511,16 @@ export function BossView({
                   size={Math.round(artWidth * 0.92)}
                   maxWidth={Math.round(artRoom * 0.92)}
                   ratio={ART_RATIO}
+                  maxShape={ART_MAX_SHAPE}
+                  hug
                   bare
                 />
               )}
             </motion.div>
 
-            {/*
-              The name sits on the figure's lower third, where these illustrations are darkest,
-              with a scrim underneath it. Putting it below the picture instead would push the
-              controls off a phone screen — the whole point of dropping the box was the room.
-            */}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-center">
-              <span
-                aria-hidden
-                className="absolute inset-x-0 bottom-0 h-32"
-                style={{ background: 'linear-gradient(to top, var(--color-arena-bg) 12%, transparent 100%)' }}
-              />
+            {/* Under the picture, not over it: laid on top, the name and its scrim hid the
+                bottom of the artwork. */}
+            <div className="pointer-events-none relative mt-1 flex flex-col items-center text-center">
               <div className="relative flex items-center gap-2.5">
                 <h2 className="text-3xl font-black leading-none text-arena-text md:text-4xl">
                   {enemy.name}
@@ -313,31 +531,60 @@ export function BossView({
                   hearts={enemy.isBoss ? BOSS_HEARTS : MINION_HEARTS}
                 />
               </div>
-              <p className="relative mt-1 text-xs leading-snug text-arena-text-dim md:text-sm">
-                {enemy.isBoss ? boss.title : `подчинённый ${boss.nameGenitive}`}
-              </p>
-              {enemy.isBoss &&
-                boss.abilities.map((a, i) => (
-                  <motion.p
-                    key={a.kind}
-                    initial={{ opacity: 0, y: 6 }}
+              {/* The title, and the boss's abilities as chips on the same line — a line of
+                  their own each ate into the picture. Tap a chip for what it does. */}
+              <div className="relative mt-1 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 px-2">
+                <p className="text-xs leading-snug text-arena-text-dim md:text-sm">
+                  {enemy.isBoss ? boss.title : `подчинённый ${boss.nameGenitive}`}
+                </p>
+                {enemy.isBoss &&
+                  boss.abilities.map((a) => (
+                    <button
+                      key={a.kind}
+                      type="button"
+                      onClick={() => setOpenAbility((k) => (k === a.kind ? null : a.kind))}
+                      aria-expanded={openAbility === a.kind}
+                      className={clsx(
+                        'pointer-events-auto flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-tight',
+                        openAbility === a.kind
+                          ? 'border-arena-amber bg-arena-amber/15 text-arena-amber'
+                          : 'border-arena-amber/40 text-arena-amber',
+                      )}
+                    >
+                      <Zap size={10} />
+                      {abilityName(a)}
+                    </button>
+                  ))}
+              </div>
+              <AnimatePresence>
+                {enemy.isBoss && openAbility && (
+                  <motion.div
+                    key={openAbility}
+                    initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.12 + i * 0.07 }}
-                    className="relative mt-0.5 px-4 text-[10px] leading-tight text-arena-amber"
+                    exit={{ opacity: 0, y: -4 }}
+                    className="pointer-events-auto absolute inset-x-4 top-full z-20 mt-1 rounded-xl border border-arena-amber/40 bg-arena-surface px-3 py-2 text-[11px] leading-snug text-arena-text shadow-lg"
+                    onClick={() => setOpenAbility(null)}
                   >
-                    {abilityName(a)} — {describeAbility(a)}
-                  </motion.p>
-                ))}
+                    {boss.abilities
+                      .filter((a) => a.kind === openAbility)
+                      .map((a) => (
+                        <span key={a.kind}>
+                          <b className="text-arena-amber">{abilityName(a)}</b> — {describeAbility(a)}
+                        </span>
+                      ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         </AnimatePresence>
 
-        {/* Clear of the name, which now hangs over the bottom of the picture. */}
-        <div className="mt-3">
-          <PulseTrace pct={hpPct} />
+        <div className="mt-1">
+          <PulseTrace pct={hpPct} className="h-7" />
         </div>
 
-        <div className="relative mt-1 h-4 overflow-hidden rounded-full bg-arena-surface-2">
+        <div className="relative mt-0.5 h-4 overflow-hidden rounded-full bg-arena-surface-2">
           <motion.div
             className="h-full rounded-full bg-arena-red"
             animate={{ width: `${hpPct}%` }}
@@ -374,6 +621,12 @@ export function BossView({
                 className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-lg font-extrabold ${
                   p.crit ? 'text-arena-red' : 'text-arena-text'
                 }`}
+                // Plain damage numbers wear your title's colour — one of the things a rank is for.
+                style={
+                  !p.crit && p.text.startsWith('-')
+                    ? { color: derived.rank.color, textShadow: `0 0 8px ${derived.rank.color}88` }
+                    : undefined
+                }
               >
                 {p.text}
               </motion.span>
@@ -381,6 +634,9 @@ export function BossView({
           </AnimatePresence>
         </div>
       </motion.div>
+
+      {/* Gru's ray: the edges of the screen ice over while reps are frozen. */}
+      <FrostOverlay active={enemy.isBoss && (profile.fight.frozenLeft ?? 0) > 0} />
 
       <CameraPanel onRep={handleRep} onUndo={handleUndo} canUndo={undoDepth > 0} feedback={feedback} />
 
@@ -401,6 +657,10 @@ export function BossView({
             </HintCard>
           </div>
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {briefing && <BossBriefing key="briefing" boss={boss} index={derived.bossIndex} onClose={closeBriefing} />}
       </AnimatePresence>
 
       <AnimatePresence>
