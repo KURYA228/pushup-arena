@@ -276,7 +276,16 @@ const OAUTH_ERROR: string | null = (() => {
     const params = new URLSearchParams(window.location.search);
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const raw = params.get('error_description') ?? hash.get('error_description') ?? params.get('error') ?? hash.get('error');
-    return raw ? translate(raw.replace(/\+/g, ' ')) : null;
+    if (!raw) return null;
+    // Said once: taken out of the address, so a reload doesn't bring the old failure back.
+    for (const k of ['error', 'error_code', 'error_description']) {
+      params.delete(k);
+      hash.delete(k);
+    }
+    const q = params.toString();
+    const h = hash.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${q ? `?${q}` : ''}${h ? `#${h}` : ''}`);
+    return translate(raw.replace(/\+/g, ' '));
   } catch {
     return null;
   }
