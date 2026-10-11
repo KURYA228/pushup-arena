@@ -54,7 +54,7 @@ export function InstallHint() {
         (canPrompt ? (
           <button
             onClick={() => void promptInstall().then((ok) => ok && dismiss())}
-            className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-xl bg-arena-amber py-2.5 text-sm font-semibold text-arena-bg active:scale-[0.98]"
+            className="btn-3d mt-2.5 w-full"
           >
             <Download size={16} /> Установить
           </button>

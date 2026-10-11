@@ -118,7 +118,9 @@ export function BossTalk({
               {[0.55, 1, 0.75, 0.9, 0.6].map((k, i) => (
                 <Bar key={i} talk={talk} weight={k} phase={i} color={color} />
               ))}
-              {/* The bubble's tail, pointing down-left at him. */}
+              {/* The bubble's tail, pointing down-left at him. Its upper half sits inside the
+                  bubble to cover the border where they join, so the bars are lifted above it —
+                  under it, the second bar lost its foot to a white notch. */}
               <span
                 className="absolute -bottom-[11px] left-4 h-5 w-5 rotate-45 border-b-[3px] border-r-[3px] bg-white"
                 style={{ borderColor: color }}
@@ -137,7 +139,7 @@ function Bar({ talk, weight, phase, color }: { talk: MotionValue<number>; weight
     const wobble = 0.65 + 0.35 * Math.abs(Math.sin(performance.now() / (55 + phase * 17) + phase));
     return `${Math.max(14, Math.min(100, v * 140 * weight * wobble))}%`;
   });
-  return <motion.span className="w-[7px] self-end rounded-full" style={{ height, background: color }} />;
+  return <motion.span className="relative z-[1] w-[7px] self-end rounded-full" style={{ height, background: color }} />;
 }
 
 /** 0..1 as a two-digit hex alpha. */

@@ -132,21 +132,9 @@ export function BossBriefing({ boss, index, onClose }: { boss: BossDef; index: n
           ))}
         </div>
 
-        <motion.button
-          ref={goRef}
-          onClick={onClose}
-          animate={{
-            boxShadow: [
-              '0 0 12px rgba(245,158,11,0.4)',
-              '0 0 26px rgba(245,158,11,0.85)',
-              '0 0 12px rgba(245,158,11,0.4)',
-            ],
-          }}
-          transition={{ duration: 1.8, repeat: Infinity }}
-          className="mt-5 w-full rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98]"
-        >
+        <button ref={goRef} onClick={onClose} className="btn-3d mt-5 w-full">
           Понятно, в бой!
-        </motion.button>
+        </button>
       </motion.div>
     </motion.div>
   );

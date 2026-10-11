@@ -84,7 +84,7 @@ export function VictoryCard({
         <button
           onClick={onShare}
           disabled={!preview}
-          className="flex items-center justify-center gap-2 rounded-xl bg-arena-amber py-3 text-sm font-semibold text-arena-bg active:scale-[0.98] disabled:opacity-50"
+          className="btn-3d"
         >
           <Share2 size={16} /> Поделиться
         </button>

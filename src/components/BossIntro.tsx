@@ -104,12 +104,15 @@ export function BossIntro({
   boss,
   index,
   size,
+  room,
   wide = false,
 }: {
   boss: BossDef;
   index: number;
   /** Width budget for the artwork, in pixels. */
   size: number;
+  /** How wide a wide picture may grow past `size`. */
+  room?: number;
   /** Whether the two sit side by side; the name's nudge depends on how far it hangs. */
   wide?: boolean;
 }) {
@@ -118,6 +121,10 @@ export function BossIntro({
   // why. The cut keeps its length either way — BossView dismisses it on its own clock, and a
   // version that finished early would start the fight before the screen had come back.
   const calm = useReducedMotion();
+  // One circle for every boss, so each arrives the same size. Cut from the middle of the
+  // picture, where the figure and the ring drawn round him are; the scenery at the sides goes.
+  const diameter = Math.round((room ?? size) * 0.72);
+  const frame = { w: diameter, h: diameter };
 
   /** Thrown in from `side`, landing at `at` — or, if asked, simply there by then. */
   const enter = (at: number, side: 'left' | 'right') =>
@@ -400,24 +407,19 @@ export function BossIntro({
             animate={figure.animate}
             transition={figure.transition}
           >
-            {/* A dark bed under the artwork.
-
-                The picture's own edges are dissolved into transparency so it has no frame,
-                which works over black and fails over anything bright: with the red light
-                pouring down, the lit screen came through those edges and the figure looked
-                as though its top had been sliced off. The bed is what the picture sits on,
-                so however strong the light gets, it never shines through the thing it is
-                supposed to be lighting. */}
+            {/* The picture as a circle, with a dark shadow round it (see SHADOWED in EnemyIcon). */}
             <span className="relative flex items-center justify-center">
-              <span
-                aria-hidden
-                className="pointer-events-none absolute -inset-x-10 -inset-y-6"
-                style={{
-                  background:
-                    'radial-gradient(ellipse 54% 56% at 50% 48%, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.9) 52%, transparent 82%)',
-                }}
+              <BossIcon
+                boss={boss}
+                index={index}
+                size={size}
+                maxWidth={frame.w}
+                ratio={1.05}
+                bare
+                hug
+                shadowed
+                frame={frame}
               />
-              <BossIcon boss={boss} index={index} size={size} maxWidth={size} ratio={1.05} bare />
             </span>
           </motion.div>
         </div>

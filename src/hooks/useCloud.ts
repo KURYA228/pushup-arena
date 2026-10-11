@@ -22,6 +22,7 @@ import {
   signInWithGoogle,
   signOut,
   signUp,
+  takeGoogleSignupClash,
   clearPendingName,
   peekPendingName,
   type CloudError,
@@ -93,6 +94,26 @@ export function useCloud(
    */
   const [unreachable, setUnreachable] = useState(false);
 
+  /** "Register with Google" landed in an account that already existed — signed back out of it. */
+  const [googleExists, setGoogleExists] = useState(false);
+  /**
+   * That account, until signing out of it has gone through: the session can still arrive from
+   * the other path (restore and listener both report it) and must not let anyone in meanwhile.
+   */
+  const rejectedRef = useRef<string | null>(null);
+  /** The session as it's let in — or not, see `takeGoogleSignupClash`. */
+  const admit = useCallback((s: Session | null): Session | null => {
+    if (!s) return null;
+    if (s.user.id === rejectedRef.current) return null;
+    if (takeGoogleSignupClash(s)) {
+      rejectedRef.current = s.user.id;
+      setGoogleExists(true);
+      void signOut();
+      return null;
+    }
+    return s;
+  }, []);
+
   useEffect(() => {
     if (!cloudConfigured()) return;
     let alive = true;
@@ -110,12 +131,12 @@ export function useCloud(
         setReady(true);
         return;
       }
-      setSession(result);
+      setSession(admit(result));
       setUnreachable(!result && hasStoredSession());
       setReady(true);
     });
     const off = onAuthChange((s) => {
-      setSession(s);
+      setSession(admit(s));
       // A background refresh that finally lands clears the offline state on its own.
       setUnreachable(!s && hasStoredSession());
       setReady(true);
@@ -125,7 +146,7 @@ export function useCloud(
       window.clearTimeout(timer);
       off();
     };
-  }, []);
+  }, [admit]);
 
   const retry = useCallback(async () => {
     const s = await retrySession();
@@ -349,7 +370,12 @@ export function useCloud(
   }, []);
 
   /** Off to Google and back; the session arrives through the auth listener on return. */
-  const googleLogin = useCallback(() => signInWithGoogle(), []);
+  const googleLogin = useCallback((intent: 'signup' | 'signin' = 'signin') => {
+    rejectedRef.current = null;
+    setGoogleExists(false);
+    return signInWithGoogle(intent);
+  }, []);
+  const clearGoogleExists = useCallback(() => setGoogleExists(false), []);
 
   const login = useCallback(async (email: string, password: string, displayName: string) => {
     const err = await signIn(email, password);
@@ -426,6 +452,8 @@ export function useCloud(
       register,
       login,
       googleLogin,
+      googleExists,
+      clearGoogleExists,
       logout,
       rename,
       retry,
@@ -450,6 +478,8 @@ export function useCloud(
       register,
       login,
       googleLogin,
+      googleExists,
+      clearGoogleExists,
       logout,
       rename,
       retry,

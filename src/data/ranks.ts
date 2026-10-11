@@ -14,6 +14,7 @@
 export interface RankDef {
   name: string;
   minLevel: number;
+  /** A badge under `public/` (see TierIcon), or an emoji. */
   icon: string;
   /** The rank's colour: avatar frame, name on the board, damage numbers in the fight. */
   color: string;
@@ -22,15 +23,15 @@ export interface RankDef {
 }
 
 export const RANKS: RankDef[] = [
-  { name: 'Новичок', minLevel: 1, icon: '🔰', color: '#9ca3af', perk: 'серая рамка' },
-  { name: 'Боец', minLevel: 5, icon: '🥊', color: '#60a5fa', perk: 'синяя рамка и цифры урона' },
-  { name: 'Воин', minLevel: 10, icon: '⚔️', color: '#34d399', perk: 'зелёная рамка и цифры урона' },
-  { name: 'Чемпион', minLevel: 20, icon: '🏆', color: '#f59e0b', perk: 'золотая рамка и цифры урона' },
-  { name: 'Легенда', minLevel: 35, icon: '🌟', color: '#f472b6', perk: 'розовая рамка со свечением' },
-  { name: 'Титан', minLevel: 50, icon: '🗿', color: '#a78bfa', perk: 'фиолетовая рамка со свечением' },
+  { name: 'Новичок', minLevel: 1, icon: 'ranks/rank-novichok.png', color: '#9ca3af', perk: 'серая рамка' },
+  { name: 'Боец', minLevel: 5, icon: 'ranks/rank-boets.png', color: '#60a5fa', perk: 'синяя рамка и цифры урона' },
+  { name: 'Воин', minLevel: 10, icon: 'ranks/rank-voin.png', color: '#34d399', perk: 'зелёная рамка и цифры урона' },
+  { name: 'Чемпион', minLevel: 20, icon: 'ranks/rank-chempion.png', color: '#f59e0b', perk: 'золотая рамка и цифры урона' },
+  { name: 'Легенда', minLevel: 35, icon: 'ranks/rank-legenda.png', color: '#f472b6', perk: 'розовая рамка со свечением' },
+  { name: 'Титан', minLevel: 50, icon: 'ranks/rank-titan.png', color: '#a78bfa', perk: 'фиолетовая рамка со свечением' },
   // Пороги ниже намеренно оставлены как были, чтобы никто не потерял уже заработанный ранг.
-  { name: 'Полубог', minLevel: 70, icon: '⚡', color: '#22d3ee', perk: 'бирюзовая сияющая рамка' },
-  { name: 'Бессмертный', minLevel: 95, icon: '👑', color: '#fde047', perk: 'золотая корона и сияющая рамка' },
+  { name: 'Полубог', minLevel: 70, icon: 'ranks/rank-polubog.png', color: '#22d3ee', perk: 'бирюзовая сияющая рамка' },
+  { name: 'Бессмертный', minLevel: 95, icon: 'ranks/rank-bessmertny.png', color: '#fde047', perk: 'золотая корона и сияющая рамка' },
 ];
 
 export function getRank(level: number): RankDef {
@@ -118,12 +119,12 @@ export interface StrengthTier {
 
 export const STRENGTH: StrengthTier[] = [
   { name: 'Без разряда', min: 0, icon: '·', color: '#6b7280' },
-  { name: 'Крепыш', min: 10, icon: '💪', color: '#a3e635' },
-  { name: 'Силач', min: 20, icon: '🏋️', color: '#34d399' },
-  { name: 'Атлет', min: 30, icon: '🤸', color: '#22d3ee' },
-  { name: 'Богатырь', min: 50, icon: '🛡️', color: '#60a5fa' },
-  { name: 'Геркулес', min: 75, icon: '🦁', color: '#f59e0b' },
-  { name: 'Колосс', min: 100, icon: '🗽', color: '#ef4444' },
+  { name: 'Крепыш', min: 10, icon: 'ranks/strength-krepysh.png', color: '#a3e635' },
+  { name: 'Силач', min: 20, icon: 'ranks/strength-silach.png', color: '#34d399' },
+  { name: 'Атлет', min: 30, icon: 'ranks/strength-atlet.png', color: '#22d3ee' },
+  { name: 'Богатырь', min: 50, icon: 'ranks/strength-bogatyr.png', color: '#60a5fa' },
+  { name: 'Геркулес', min: 75, icon: 'ranks/strength-gerkules.png', color: '#f59e0b' },
+  { name: 'Колосс', min: 100, icon: 'ranks/strength-koloss.png', color: '#ef4444' },
 ];
 
 export function strengthFor(bestSet: number): StrengthTier {

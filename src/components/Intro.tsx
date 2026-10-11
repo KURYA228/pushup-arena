@@ -1,45 +1,33 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { SkipForward } from 'lucide-react';
+import { Info, SkipForward } from 'lucide-react';
 import { AGE_MAX, AGE_MIN, NICK_MAX, NICK_MIN, markIntroSeen, readIntroAbout, saveIntroAbout } from '../lib/intro';
 
 /**
- * The cold open: the Colosseum, a pull-back into darkness, then the host asking whether you're
- * in. Shown once — the flag lives in localStorage, and the dev panel can put it back.
+ * The cold open: a title screen over the Colosseum, then the host getting to know you. Shown once — the flag lives in localStorage, and the dev panel can put it back.
  *
  * The refusal doesn't lead anywhere, on purpose. A first-run screen that can trap you behind a
  * wrong answer is a bug, so "no" gets a comeback and the door opens anyway.
  */
 
-/** The arena stops pulling back at this point and the dark takes over. */
-const PULL_BACK_SEC = 3.2;
-
 /** How long the gates take to open on the way in — light floods out of the button. */
 const ENTER_SEC = 0.55;
 
-/** The breathing glow on the buttons that move you forward. */
-const BUTTON_GLOW = [
-  '0 0 14px rgba(245, 158, 11, 0.45), 0 0 0 rgba(245, 158, 11, 0)',
-  '0 0 26px rgba(245, 158, 11, 0.85), 0 0 60px rgba(245, 158, 11, 0.35)',
-  '0 0 14px rgba(245, 158, 11, 0.45), 0 0 0 rgba(245, 158, 11, 0)',
-];
-const GLOW_PULSE = { duration: 1.8, repeat: Infinity, ease: 'easeInOut' as const };
+/**
+ * Where the intro sends you: `signin` for "already have an account" — the sign-in form alone —
+ * and `signup` for everyone who met the host, or skipped him, and gets the full form.
+ */
+export type IntroExit = 'signin' | 'signup';
 
-export function Intro({ onDone }: { onDone: () => void }) {
-  const [act, setAct] = useState<'arena' | 'talk'>('arena');
+export function Intro({ onDone }: { onDone: (exit: IntroExit) => void }) {
+  const [act, setAct] = useState<'title' | 'talk'>('title');
   const calm = useReducedMotion();
   /** Where the light pours from: the button that was pressed, in viewport pixels. */
   const [gate, setGate] = useState<{ x: number; y: number } | null>(null);
 
-  useEffect(() => {
-    if (act !== 'arena') return;
-    const id = window.setTimeout(() => setAct('talk'), PULL_BACK_SEC * 1000);
-    return () => window.clearTimeout(id);
-  }, [act]);
-
-  const finish = () => {
+  const finish = (exit: IntroExit = 'signup') => {
     markIntroSeen();
-    onDone();
+    onDone(exit);
   };
 
   /**
@@ -50,7 +38,7 @@ export function Intro({ onDone }: { onDone: () => void }) {
   const enter = (from: { x: number; y: number }) => {
     if (calm) return finish();
     setGate(from);
-    window.setTimeout(finish, ENTER_SEC * 1000);
+    window.setTimeout(() => finish(), ENTER_SEC * 1000);
   };
 
   return (
@@ -62,9 +50,13 @@ export function Intro({ onDone }: { onDone: () => void }) {
     >
       {/* Cross-fade rather than `mode="wait"`: waiting makes the next act hostage to the
           previous one's exit animation, and animations stop running while the page is hidden —
-          so backgrounding the app mid-intro would leave it stuck on the arena. */}
+          so backgrounding the app mid-intro would leave it stuck on the title. */}
       <AnimatePresence>
-        {act === 'arena' ? <ArenaShot key="arena" /> : <HostScene key="talk" onFinish={enter} />}
+        {act === 'title' ? (
+          <TitleScreen key="title" onStart={() => setAct('talk')} onHaveAccount={() => finish('signin')} />
+        ) : (
+          <HostScene key="talk" onFinish={enter} />
+        )}
       </AnimatePresence>
 
       {gate && (
@@ -86,203 +78,128 @@ export function Intro({ onDone }: { onDone: () => void }) {
         />
       )}
 
-      <button
-        onClick={finish}
-        // Top corner: the bottom of the screen is where the way into the arena appears.
-        className="safe-top absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[11px] text-white/60 backdrop-blur active:scale-95"
-      >
-        Пропустить <SkipForward size={12} />
-      </button>
+      {/* The title screen has its own way past — "already have an account". */}
+      {act === 'talk' && (
+        <button
+          onClick={() => finish()}
+          // Top corner: the bottom of the screen is where the way into the arena appears.
+          className="safe-top absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[11px] text-white/60 backdrop-blur active:scale-95"
+        >
+          Пропустить <SkipForward size={12} />
+        </button>
+      )}
     </motion.div>
   );
 }
 
 /* ------------------------------ act one ------------------------------- */
 
-function ArenaShot() {
+/**
+ * The arena behind the whole intro. Swap the file for the illustrated one when it's drawn —
+ * nothing here depends on what's in the picture.
+ */
+const COLOSSEUM = `${import.meta.env.BASE_URL}intro/colosseum.jpg`;
+
+/** The chunky display face the title, tagline and button share (Cyrillic included). */
+const DISPLAY_FONT = "'Russo One', 'Inter', system-ui, sans-serif";
+
+/** The tagline yellow — the same as the face of the game buttons (`.btn-3d`). */
+const YELLOW = '#f2b705';
+
+/**
+ * Act one: the title screen. The arena, dimmed to a night blue, the name over the sky, and two
+ * ways on — meet the host, or straight to signing in for someone who's been here before.
+ */
+function TitleScreen({ onStart, onHaveAccount }: { onStart: () => void; onHaveAccount: () => void }) {
+  const calm = useReducedMotion();
   return (
     <motion.div
-      className="absolute inset-0 flex items-center justify-center"
+      className="absolute inset-0"
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
     >
-      {/* Starts filling the frame and retreats — the camera pulling back off the arena. */}
-      <motion.div
-        className="absolute inset-0 flex items-center justify-center"
-        initial={{ scale: 2.1, y: 30 }}
-        animate={{ scale: 0.92, y: 0 }}
-        transition={{ duration: PULL_BACK_SEC, ease: [0.22, 0.61, 0.36, 1] }}
-      >
-        <Colosseum />
-      </motion.div>
+      <ArenaBackdrop />
 
-      {/* The dark closes in over the last third of the shot. */}
-      <motion.div
-        className="pointer-events-none absolute inset-0 bg-black"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: [0, 0, 1] }}
-        transition={{ duration: PULL_BACK_SEC, times: [0, 0.6, 1], ease: 'easeIn' }}
-      />
+      <div className="safe-top safe-bottom absolute inset-0 flex flex-col items-center px-6">
+        {/* The name, letter by letter out of a blur, a word never splitting across lines. */}
+        <h1
+          className="mt-[24vh] text-center text-[52px] uppercase leading-[1.02] text-white sm:text-7xl"
+          style={{ fontFamily: DISPLAY_FONT, textShadow: '0 3px 0 rgba(0,0,0,0.45), 0 8px 30px rgba(0,0,0,0.6)' }}
+          aria-label="Push Up Legends"
+        >
+          {['Push Up', 'Legends'].map((line, li) => (
+            <span key={li} aria-hidden className="block whitespace-nowrap">
+              {Array.from(line).map((ch, i) => (
+                <motion.span
+                  key={i}
+                  className="inline-block"
+                  initial={calm ? false : { opacity: 0, y: 18, filter: 'blur(6px)' }}
+                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                  transition={{ delay: 0.3 + (li * 7 + i) * 0.045, duration: 0.45, ease: 'easeOut' }}
+                >
+                  {ch === ' ' ? ' ' : ch}
+                </motion.span>
+              ))}
+            </span>
+          ))}
+        </h1>
 
-      {/* The title, big, over the sky as the arena appears. Letter by letter, each rising out
-          of a blur — the name assembling itself — and a word never splits across lines. */}
-      <motion.h1
-        className="absolute inset-x-0 top-[9%] px-4 text-center text-[44px] font-black uppercase leading-[1.05] tracking-[0.06em] text-arena-amber sm:text-6xl"
-        initial={{ opacity: 0, scale: 1.08 }}
-        animate={{ opacity: [0, 1, 1, 0], scale: [1.08, 1, 1, 0.98] }}
-        transition={{ duration: PULL_BACK_SEC, times: [0, 0.15, 0.8, 0.95] }}
-        aria-label="Push Up Legends"
-      >
-        {['Push Up', 'Legends'].map((line, li) => (
-          <span key={li} aria-hidden className="block whitespace-nowrap">
-            {Array.from(line).map((ch, i) => (
-              <motion.span
-                key={i}
-                className="inline-block"
-                style={{
-                  textShadow:
-                    '0 0 12px rgba(245, 158, 11, 0.95), 0 0 32px rgba(245, 158, 11, 0.65), 0 0 64px rgba(245, 158, 11, 0.4), 0 2px 2px rgba(0, 0, 0, 0.8)',
-                }}
-                initial={{ opacity: 0, y: 16, filter: 'blur(6px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                transition={{ delay: 0.35 + (li * 7 + i) * 0.05, duration: 0.45, ease: 'easeOut' }}
-              >
-                {ch === ' ' ? '\u00a0' : ch}
-              </motion.span>
-            ))}
-          </span>
-        ))}
-      </motion.h1>
+        <motion.p
+          className="mt-5 text-center text-[17px] leading-snug"
+          style={{ fontFamily: DISPLAY_FONT, color: YELLOW, textShadow: '0 2px 0 rgba(0,0,0,0.5)' }}
+          initial={calm ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 1.1, duration: 0.5 }}
+        >
+          Качайся. Расти. Стань легендой.
+        </motion.p>
+
+        <motion.div
+          className="mt-auto w-full max-w-sm pb-6"
+          initial={calm ? false : { opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 1.5, type: 'spring', stiffness: 260, damping: 24 }}
+        >
+          <button onClick={onStart} className="btn-3d h-14 w-full text-[22px]">
+            Начать
+          </button>
+          <button onClick={onHaveAccount} className="mt-5 w-full py-2 text-center text-[15px] text-white/60 active:text-white/90">
+            У меня уже есть аккаунт
+          </button>
+        </motion.div>
+      </div>
     </motion.div>
   );
 }
 
-const COLOSSEUM = `${import.meta.env.BASE_URL}intro/colosseum.jpg`;
-
 /**
- * Floodlights on the rim of the photo, in its own pixels (1536×1024), and which way each one's
- * beam leans in the picture — the live beams sweep around that same direction.
+ * The arena behind everything, under a night-blue veil that deepens towards the bottom where
+ * the buttons sit. It settles in from a little close, then drifts very slowly so the screen
+ * never looks frozen.
  */
-const FLOODLIGHTS = [
-  { x: 150, y: 290, lean: -32 },
-  { x: 366, y: 272, lean: 22 },
-  { x: 797, y: 274, lean: -18 },
-  { x: 1207, y: 296, lean: -16 },
-  { x: 1322, y: 302, lean: 18 },
-];
-
-/** Spots in the stands and on the rim where a camera flash can go off. */
-const FLASHES = Array.from({ length: 16 }, (_, i) => {
-  const t = ((i * 7) % 16) / 15;
-  return { x: 180 + t * 1160, y: 330 + ((i * 37) % 70) - Math.sin(t * Math.PI) * 40 };
-});
-
-/**
- * The amphitheatre at night: a photo, brought to life on top — floodlight beams sweeping the
- * sky, the lamps themselves throbbing, and camera flashes popping in the stands.
- */
-function Colosseum() {
+function ArenaBackdrop({ dim = false }: { dim?: boolean }) {
+  const calm = useReducedMotion();
   return (
-    // The photo's top and bottom dissolve into the dark around it instead of ending in a
-    // hard edge across the screen.
-    <svg
-      viewBox="0 0 1536 1024"
-      className="h-auto w-[130%] max-w-none"
-      style={{
-        maskImage: 'linear-gradient(to bottom, transparent, #000 14%, #000 82%, transparent)',
-        WebkitMaskImage: 'linear-gradient(to bottom, transparent, #000 14%, #000 82%, transparent)',
-      }}
-      aria-hidden
-    >
-      <defs>
-        <linearGradient id="beam" x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="#dfe8ff" stopOpacity="0.55" />
-          <stop offset="35%" stopColor="#b9c9ff" stopOpacity="0.22" />
-          <stop offset="100%" stopColor="#b9c9ff" stopOpacity="0" />
-        </linearGradient>
-        <radialGradient id="lamp">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
-          <stop offset="30%" stopColor="#dfe8ff" stopOpacity="0.7" />
-          <stop offset="100%" stopColor="#9fb4ff" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id="flash">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
-          <stop offset="40%" stopColor="#fff6dd" stopOpacity="0.6" />
-          <stop offset="100%" stopColor="#fff6dd" stopOpacity="0" />
-        </radialGradient>
-        <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="9" />
-        </filter>
-      </defs>
-
-      <image href={COLOSSEUM} width="1536" height="1024" preserveAspectRatio="xMidYMid slice" />
-
-      {/* Searchlights: a beam out of every floodlight, sweeping the sky slowly and out of step,
-          added on top of the picture so the light itself is what moves. */}
-      <g style={{ mixBlendMode: 'screen' }}>
-        {FLOODLIGHTS.map((f, i) => (
-          <motion.polygon
-            key={`beam-${i}`}
-            points={`${f.x - 10},${f.y} ${f.x + 10},${f.y} ${f.x + 80},${f.y - 560} ${f.x - 80},${f.y - 560}`}
-            fill="url(#beam)"
-            filter="url(#soft)"
-            style={{ transformBox: 'fill-box', transformOrigin: '50% 100%' }}
-            initial={{ rotate: f.lean }}
-            animate={{ rotate: [f.lean - 14, f.lean + 14, f.lean - 14], opacity: [0.7, 1, 0.7] }}
-            transition={{ duration: 4 + (i % 3) * 0.9, repeat: Infinity, ease: 'easeInOut', delay: i * 0.4 }}
-          />
-        ))}
-      </g>
-
-      {/* The lamps: a halo that breathes, a hot core, and now and then a bright flare. */}
-      {FLOODLIGHTS.map((f, i) => (
-        <g key={`lamp-${i}`} style={{ mixBlendMode: 'screen' }}>
-          <motion.circle
-            cx={f.x}
-            cy={f.y}
-            r={70}
-            fill="url(#lamp)"
-            animate={{ opacity: [0.35, 0.7, 0.35] }}
-            transition={{ duration: 1.6 + (i % 3) * 0.35, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          <motion.circle
-            cx={f.x}
-            cy={f.y}
-            r={26}
-            fill="url(#lamp)"
-            style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
-            animate={{ opacity: [0.8, 1, 0.8], scale: [1, 1.2, 1] }}
-            transition={{ duration: 0.9 + (i % 2) * 0.3, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          {/* Flare: a star burst that blinks out of the lamp. */}
-          <motion.g
-            style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
-            initial={{ opacity: 0, scale: 0.4 }}
-            animate={{ opacity: [0, 0, 1, 0], scale: [0.4, 0.4, 1.3, 0.6] }}
-            transition={{ duration: 2.6 + i * 0.37, repeat: Infinity, delay: 0.3 + i * 0.45, times: [0, 0.78, 0.84, 1] }}
-          >
-            <rect x={f.x - 90} y={f.y - 2.5} width="180" height="5" rx="2.5" fill="#ffffff" filter="url(#soft)" />
-            <rect x={f.x - 2.5} y={f.y - 60} width="5" height="120" rx="2.5" fill="#ffffff" filter="url(#soft)" />
-            <circle cx={f.x} cy={f.y} r={40} fill="url(#flash)" />
-          </motion.g>
-        </g>
-      ))}
-
-      {/* The crowd: camera flashes going off here and there in the stands. */}
-      {FLASHES.map((p, i) => (
-        <motion.circle
-          key={`flash-${i}`}
-          cx={p.x}
-          cy={p.y}
-          r={18}
-          fill="url(#flash)"
-          style={{ transformBox: 'fill-box', transformOrigin: 'center', mixBlendMode: 'screen' }}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: [0, 0, 1, 0], scale: [0.4, 0.4, 1.4, 0.5] }}
-          transition={{ duration: 1.4 + (i % 4) * 0.45, repeat: Infinity, delay: 0.2 + i * 0.19, times: [0, 0.82, 0.86, 1] }}
-        />
-      ))}
-    </svg>
+    <>
+      <motion.img
+        src={COLOSSEUM}
+        alt=""
+        aria-hidden
+        className="absolute inset-0 h-full w-full object-cover"
+        style={{ filter: dim ? 'brightness(0.55) blur(1.5px)' : undefined }}
+        initial={calm ? false : { opacity: 0, scale: 1.12 }}
+        animate={calm ? { opacity: 1 } : { opacity: 1, scale: [1.12, 1.03, 1.06, 1.03] }}
+        transition={{ opacity: { duration: 1 }, scale: { duration: 24, times: [0, 0.12, 0.56, 1], ease: 'easeInOut', repeat: Infinity, repeatType: 'mirror' } }}
+      />
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(to bottom, rgba(14,20,38,0.62) 0%, rgba(14,20,38,0.5) 40%, rgba(10,14,26,0.78) 78%, rgba(8,10,18,0.94) 100%)',
+        }}
+      />
+    </>
   );
 }
 
@@ -297,15 +214,14 @@ const HOST_WAVE = `${import.meta.env.BASE_URL}intro/host-full.webp`;
 const HOST_GREET = `${import.meta.env.BASE_URL}intro/host-greet.webp`;
 
 /** His opening, in two bubbles: who he is, then — turning to offer his hand — who you are. */
-const HELLO = 'Привет, воин! Я создатель этого всего и хочу посвятить тебя в своё творение!';
+const HELLO = 'Привет, воин! Я создал это место своими руками и хочу поделиться с тобой своим творением!';
 const MEET = 'Давай сначала познакомимся. Меня зовут Кирюха, а тебя?';
-/** How long the hello stays on screen once typed, before the introduction replaces it. */
-const HELLO_HOLD_MS = 1600;
+
+/** The pause between his question being typed out and the answer card appearing. */
+const ANSWER_DELAY_MS = 300;
 
 /** When things happen in act two, seconds from its start. */
 const T = {
-  /** The arena comes up out of the dark. */
-  backdrop: 1.2,
   /** He steps in. */
   host: 0.9,
   /** And starts talking once he's there. */
@@ -391,18 +307,14 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
     setTyped(false);
     setStep(next);
   };
-  // The hello stays up long enough to read, then gives way to the introduction (a tap sooner).
+  // After a question is asked, its answer field — once he's finished and had a beat, not while
+  // the last words are still landing.
   useEffect(() => {
-    if (step !== 'hello' || !typed) return;
-    const id = window.setTimeout(() => go('meet'), HELLO_HOLD_MS);
+    if (!typed || (step !== 'meet' && step !== 'ask-age')) return;
+    const next = step === 'meet' ? 'name' : 'age';
+    const id = window.setTimeout(() => setStep(next), calm ? 0 : ANSWER_DELAY_MS);
     return () => window.clearTimeout(id);
-  }, [step, typed]);
-  // After a question is asked, its answer field.
-  useEffect(() => {
-    if (!typed) return;
-    if (step === 'meet') setStep('name');
-    if (step === 'ask-age') setStep('age');
-  }, [step, typed]);
+  }, [step, typed, calm]);
 
   const name = nick.trim();
   const nameOk = name.length >= NICK_MIN && name.length <= NICK_MAX;
@@ -423,6 +335,8 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
   // One bubble per thought: who he is, then the introduction (which stays up while you answer).
   const lineKey = step === 'name' ? 'meet' : step === 'age' ? 'ask-age' : step;
   const typing = bubble != null && (step === 'hello' || step === 'meet' || step === 'ask-age' || step === 'welcome') && !typed;
+  /** An answer card is up: he steps back a little to make room for it. */
+  const answering = step === 'name' || step === 'age';
   // He offers his hand from the introduction on.
   const greeting = step != null && step !== 'hello';
 
@@ -433,22 +347,14 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
+      // A tap finishes the line being typed; moving on is always the button's job, so nobody
+      // loses a line they hadn't finished reading.
       onClick={() => {
         if (typing) setSkip(true);
-        else if (step === 'hello') go('meet');
       }}
     >
-      {/* The arena, barely there: dark, a little soft, coming up out of the black. */}
-      <motion.img
-        src={`${import.meta.env.BASE_URL}intro/colosseum.jpg`}
-        alt=""
-        aria-hidden
-        className="absolute inset-0 h-full w-full object-cover"
-        style={{ filter: 'brightness(0.28) saturate(0.8) blur(1.5px)' }}
-        initial={{ opacity: 0, scale: 1.08 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: calm ? 0 : T.backdrop, ease: 'easeOut' }}
-      />
+      {/* The same arena as the title, a little darker and softer behind him. */}
+      <ArenaBackdrop dim />
       {/* Darker at the edges, so the eye goes to the middle where he'll stand. */}
       <div
         aria-hidden
@@ -456,7 +362,9 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
         style={{ background: 'radial-gradient(ellipse 70% 60% at 50% 55%, transparent 30%, rgba(0,0,0,0.85) 100%)' }}
       />
 
-      <div className="safe-top safe-bottom absolute inset-0 flex flex-col items-center justify-end px-5 pb-6">
+      {/* The bottom gap is the safe area or 1.5rem, whichever is more: `safe-bottom` alongside
+          `pb-6` silently won and left no gap at all in a browser tab, where the safe area is 0. */}
+      <div className="safe-top absolute inset-0 flex flex-col items-center justify-end px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         {/* What he says, over his head. */}
         <div className="relative z-10 mb-3 min-h-[76px] w-full max-w-sm">
           <AnimatePresence mode="wait">
@@ -476,8 +384,49 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
                   skip={skip || step === 'name' || step === 'age'}
                   onDone={() => setTyped(true)}
                 />
-                <span className="absolute -bottom-[7px] left-1/2 h-3.5 w-3.5 -translate-x-1/2 rotate-45 border-b border-r border-arena-amber/60 bg-arena-surface" />
+                {/* The tail points at him — not while the answer card sits in between. */}
+                {!answering && (
+                  <span className="absolute -bottom-[7px] left-1/2 h-3.5 w-3.5 -translate-x-1/2 rotate-45 border-b border-r border-arena-amber/60 bg-arena-surface" />
+                )}
               </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Your answer, right under his question: high on the screen, where the keyboard can't
+            cover it, and read together with what he asked. */}
+        <div className="relative z-10 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+          <AnimatePresence mode="wait">
+            {step === 'name' && (
+              <Answer
+                key="name"
+                label="Твой ник"
+                value={nick}
+                onChange={setNick}
+                placeholder="как тебя звать, воин?"
+                maxLength={NICK_MAX}
+                ok={nameOk}
+                hint="Этот ник будет у тебя в игре — под ним тебя увидят в таблице лидеров."
+                rule={`от ${NICK_MIN} до ${NICK_MAX} символов`}
+                onSubmit={() => go('ask-age')}
+              />
+            )}
+            {step === 'age' && (
+              <Answer
+                key="age"
+                label="Возраст"
+                value={age}
+                onChange={(v) => setAge(v.replace(/\D/g, '').slice(0, 3))}
+                placeholder="сколько тебе лет?"
+                numeric
+                ok={ageOk}
+                hint="Возраст ни на что не влияет — просто хочу знать, с кем имею дело."
+                rule={`от ${AGE_MIN} до ${AGE_MAX}`}
+                onSubmit={() => {
+                  void saveIntroAbout({ nickname: name, age: ageNum });
+                  go('welcome');
+                }}
+              />
             )}
           </AnimatePresence>
         </div>
@@ -497,11 +446,20 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
             transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
           />
           {/* Two poses on top of each other, cross-faded: waving hello, then a hand held out. */}
+          {/* A size smaller while you answer, to leave the room to the card. */}
           <motion.div
             className="relative"
-            style={{ height: 'min(48vh, 460px)', aspectRatio: '446 / 1100' }}
-            animate={calm ? undefined : { scale: [1, 1.012, 1] }}
-            transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+            style={{ aspectRatio: '446 / 1100' }}
+            initial={false}
+            animate={{
+              // dvh, not vh: on a phone vh is the height with the browser's bars hidden.
+              height: answering ? 'min(36dvh, 360px)' : 'min(46dvh, 460px)',
+              ...(calm ? {} : { scale: [1, 1.012, 1] }),
+            }}
+            transition={{
+              height: { type: 'spring', stiffness: 220, damping: 30 },
+              scale: { duration: 4, repeat: Infinity, ease: 'easeInOut' },
+            }}
           >
             {[HOST_WAVE, HOST_GREET].map((src, i) => (
               <motion.img
@@ -522,61 +480,51 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
           </span>
         </motion.div>
 
-        {/* Your answer, or the way in. */}
-        <div className="mt-4 min-h-[96px] w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        {/* The way on, under him. */}
+        <div className={`w-full max-w-sm ${answering ? 'h-6' : 'mt-4 min-h-[72px]'}`} onClick={(e) => e.stopPropagation()}>
           <AnimatePresence mode="wait">
-            {step === 'name' && (
-              <Answer
-                key="name"
-                label="Твой ник"
-                value={nick}
-                onChange={setNick}
-                placeholder="как тебя звать, воин?"
-                maxLength={NICK_MAX}
-                ok={nameOk}
-                hint={`от ${NICK_MIN} до ${NICK_MAX} символов — так тебя увидят в таблице лидеров`}
-                onSubmit={() => go('ask-age')}
-              />
-            )}
-            {step === 'age' && (
-              <Answer
-                key="age"
-                label="Возраст"
-                value={age}
-                onChange={(v) => setAge(v.replace(/\D/g, '').slice(0, 3))}
-                placeholder="сколько тебе лет?"
-                numeric
-                ok={ageOk}
-                hint={`от ${AGE_MIN} до ${AGE_MAX}`}
-                onSubmit={() => {
-                  void saveIntroAbout({ nickname: name, age: ageNum });
-                  go('welcome');
-                }}
-              />
+            {step === 'hello' && typed && (
+              // The entrance moves a wrapper: the button's own transform is its press.
+              <motion.div
+                key="next"
+                className="mt-2"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8, transition: { duration: 0.15 } }}
+                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+              >
+                <button onClick={() => go('meet')} className="btn-3d w-full">
+                  Дальше
+                </button>
+              </motion.div>
             )}
             {step === 'welcome' && typed && (
-              <motion.button
+              <motion.div
                 key="go"
+                className="mt-2"
                 initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0, boxShadow: BUTTON_GLOW }}
-                transition={{ type: 'spring', stiffness: 320, damping: 26, boxShadow: GLOW_PULSE }}
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  onFinish({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-                }}
-                className="arena-glow relative mt-6 h-12 w-full overflow-hidden rounded-xl bg-arena-amber text-sm font-bold text-black active:scale-[0.98]"
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
               >
-                {!calm && (
-                  <motion.span
-                    aria-hidden
-                    className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/50 to-transparent"
-                    initial={{ x: '-120%' }}
-                    animate={{ x: ['-120%', '400%'] }}
-                    transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 1.4, ease: 'easeInOut' }}
-                  />
-                )}
-                <span className="relative">На арену</span>
-              </motion.button>
+                <button
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    onFinish({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+                  }}
+                  className="btn-3d relative w-full overflow-hidden"
+                >
+                  {!calm && (
+                    <motion.span
+                      aria-hidden
+                      className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/50 to-transparent"
+                      initial={{ x: '-120%' }}
+                      animate={{ x: ['-120%', '400%'] }}
+                      transition={{ duration: 1.1, repeat: Infinity, repeatDelay: 1.4, ease: 'easeInOut' }}
+                    />
+                  )}
+                  <span className="relative">На арену</span>
+                </button>
+              </motion.div>
             )}
           </AnimatePresence>
         </div>
@@ -595,6 +543,7 @@ function Answer({
   numeric = false,
   ok,
   hint,
+  rule,
   onSubmit,
 }: {
   label: string;
@@ -604,11 +553,15 @@ function Answer({
   maxLength?: number;
   numeric?: boolean;
   ok: boolean;
+  /** What the answer is for, said before it's typed. */
   hint: string;
+  /** What counts as a valid answer. */
+  rule: string;
   onSubmit: () => void;
 }) {
   return (
     <motion.form
+      className="mb-4 rounded-2xl border border-arena-amber/30 bg-black/65 p-3.5 backdrop-blur-md"
       initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8, transition: { duration: 0.15 } }}
@@ -619,7 +572,11 @@ function Answer({
       }}
     >
       <label className="block text-[11px] font-semibold uppercase tracking-wider text-arena-amber">{label}</label>
-      <div className="mt-1 flex gap-2">
+      <p className="mt-1 flex gap-1.5 text-xs leading-snug text-arena-text">
+        <Info size={14} className="mt-px shrink-0 text-arena-amber" />
+        {hint}
+      </p>
+      <div className="mt-2.5 flex gap-2">
         <input
           autoFocus
           value={value}
@@ -631,17 +588,11 @@ function Answer({
           autoComplete="off"
           className="min-w-0 flex-1 rounded-xl border border-arena-amber/50 bg-black/60 px-3 py-3 text-base text-arena-text outline-none backdrop-blur placeholder:text-arena-text-dim focus:border-arena-amber"
         />
-        <motion.button
-          type="submit"
-          disabled={!ok}
-          animate={ok ? { boxShadow: BUTTON_GLOW } : { boxShadow: 'none' }}
-          transition={ok ? GLOW_PULSE : { duration: 0.2 }}
-          className="shrink-0 rounded-xl bg-arena-amber px-4 text-sm font-bold text-black active:scale-95 disabled:opacity-40"
-        >
+        <button type="submit" disabled={!ok} className="btn-3d shrink-0 text-base">
           Дальше
-        </motion.button>
+        </button>
       </div>
-      <p className="mt-1 text-[11px] text-arena-text-dim">{hint}</p>
+      <p className="mt-1.5 text-[11px] text-arena-text-dim">{rule}</p>
     </motion.form>
   );
 }

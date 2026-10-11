@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { SET_BREAK_MS } from '../data/abilities';
+import { TierIcon } from './TierIcon';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronRight, X } from 'lucide-react';
 import clsx from 'clsx';
@@ -105,9 +107,13 @@ function Tile({
       className="flex min-w-0 flex-col items-center rounded-xl bg-arena-surface-2 px-1.5 py-2 text-center active:scale-95"
     >
       <span className="text-[9px] uppercase tracking-wider text-arena-text-dim">{label}</span>
-      {/* Still: a badge, not a notification. */}
-      <span className="mt-1 text-2xl leading-none" style={{ filter: `drop-shadow(0 0 6px ${color}88)` }}>
-        {icon}
+      {/* Still: a badge, not a notification. A fixed-height slot, so a drawn badge and an emoji
+          take the same room and the three bars below line up. */}
+      <span
+        className="mt-1 flex h-8 items-center justify-center text-2xl leading-none"
+        style={{ filter: `drop-shadow(0 0 6px ${color}88)` }}
+      >
+        <TierIcon icon={icon} />
       </span>
       <span className="mt-1 w-full truncate text-xs font-bold" style={{ color }}>
         {name}
@@ -245,7 +251,7 @@ function RanksSheet({
         {tab === 'strength' && (
         <Ladder
           title="Сила"
-          about="За лучший подход без паузы: пауза от 3 секунд — новый подход. Это про то, что ты можешь, а не сколько играешь."
+          about={`За лучший подход без паузы: пауза от ${SET_BREAK_MS / 1000} секунд — новый подход. Это про то, что ты можешь, а не сколько играешь.`}
           steps={STRENGTH.slice(1).map((s) => ({
             key: s.name,
             icon: s.icon,
@@ -292,7 +298,9 @@ function Ladder({
             )}
             style={s.current ? { borderColor: s.color, boxShadow: `0 0 14px ${s.color}44` } : undefined}
           >
-            <span className={clsx('text-xl leading-none', !s.reached && 'grayscale')}>{s.icon}</span>
+            <span className={clsx('text-xl leading-none', !s.reached && 'grayscale')}>
+              <TierIcon icon={s.icon} />
+            </span>
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold" style={{ color: s.reached ? s.color : undefined }}>
                 {s.name}

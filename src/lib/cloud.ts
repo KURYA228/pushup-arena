@@ -200,13 +200,16 @@ export interface LeaderboardRow {
   weekReps: number;
 }
 
-export type CloudError = { message: string } | null;
+/** `exists`: signing up with an address that already has an account — the form offers to sign in. */
+export type CloudError = { message: string; code?: 'exists' } | null;
+
+export const ACCOUNT_EXISTS = 'Аккаунт с этой почтой уже существует.';
 
 /** Turns Supabase's English errors into something readable in the app's own voice. */
 function translate(message: string): string {
   const m = message.toLowerCase();
   if (m.includes('invalid login credentials')) return 'Неверная почта или пароль.';
-  if (m.includes('user already registered')) return 'Такая почта уже зарегистрирована — войди.';
+  if (m.includes('user already registered')) return ACCOUNT_EXISTS;
   if (m.includes('password should be at least')) return 'Пароль слишком короткий — нужно от 6 символов.';
   if (m.includes('duplicate key') && m.includes('display_name')) return 'Это имя уже занято.';
   if (m.includes('email not confirmed')) {
@@ -388,7 +391,16 @@ export async function signUp(
     password,
     options: { emailRedirectTo: redirectTarget() },
   });
-  if (error) return { error: { message: translate(error.message) }, needsConfirmation: false };
+  if (error) {
+    const exists = translate(error.message) === ACCOUNT_EXISTS;
+    return { error: { message: translate(error.message), ...(exists && { code: 'exists' as const }) }, needsConfirmation: false };
+  }
+  // With confirmation on, Supabase won't say an address is taken — that would let anyone probe
+  // which addresses have accounts. It answers as if it worked, with a user that has no
+  // identities. Nothing was created and no letter goes out, so say what actually happened.
+  if (data.user && data.user.identities?.length === 0) {
+    return { error: { message: ACCOUNT_EXISTS, code: 'exists' }, needsConfirmation: false };
+  }
 
   rememberPendingName(displayName);
 
@@ -414,9 +426,15 @@ export async function signIn(email: string, password: string): Promise<CloudErro
  * Needs Google switched on in Supabase (Authentication → Providers) with a client from Google
  * Cloud — see README, «Вход через Google».
  */
-export async function signInWithGoogle(): Promise<CloudError> {
+export async function signInWithGoogle(intent: 'signup' | 'signin' = 'signin'): Promise<CloudError> {
   const db = supabase();
   if (!db) return { message: 'Облако не настроено.' };
+  try {
+    if (intent === 'signup') localStorage.setItem(GOOGLE_SIGNUP_KEY, String(Date.now()));
+    else localStorage.removeItem(GOOGLE_SIGNUP_KEY);
+  } catch {
+    // No storage: the check below just won't run, and Google signs into the account as usual.
+  }
   const { error } = await db.auth.signInWithOAuth({
     provider: 'google',
     // Always the account picker, so a shared device doesn't silently reuse the last account.
@@ -429,6 +447,31 @@ export async function signInWithGoogle(): Promise<CloudError> {
  * Signing out keeps the address on file by default, so coming back is one password away.
  * `forget` is the stronger version for a shared or borrowed device: it wipes that trace too.
  */
+const GOOGLE_SIGNUP_KEY = 'arena.googleSignup';
+
+/**
+ * Came back from "register with Google" into an account that was already there?
+ *
+ * Google doesn't tell the two apart — it signs into the existing account either way — so the time
+ * the button was pressed is kept across the trip, and an account created before it was not
+ * created by it. A sign-up that meets an existing account should say so, the same as the e-mail
+ * form does. Consumes the mark: asked again, the answer is no.
+ */
+export function takeGoogleSignupClash(session: Session): boolean {
+  let pressed: number;
+  try {
+    const raw = localStorage.getItem(GOOGLE_SIGNUP_KEY);
+    if (!raw) return false;
+    localStorage.removeItem(GOOGLE_SIGNUP_KEY);
+    pressed = Number(raw);
+  } catch {
+    return false;
+  }
+  const created = Date.parse(session.user.created_at);
+  // A few seconds of slack for the device clock and the server's not agreeing.
+  return Number.isFinite(pressed) && Number.isFinite(created) && created < pressed - 5000;
+}
+
 export async function signOut(forget = false): Promise<void> {
   await supabase()?.auth.signOut();
   if (forget) forgetAccount();

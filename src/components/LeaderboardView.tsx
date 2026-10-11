@@ -20,6 +20,7 @@ import { AuthView, ChooseNameForm } from './AuthView';
 import { Avatar } from './PlayerBadge';
 import { getRank, leagueFor, strengthFor } from '../data/ranks';
 import { CountUp } from './CountUp';
+import { TierIcon } from './TierIcon';
 
 /**
  * The board.
@@ -312,13 +313,19 @@ function Podium({ rows, sortId, myId }: { rows: LeaderboardRow[]; sortId: SortId
                 size={place === 0 ? 'md' : 'sm'}
                 className={place === 0 ? 'arena-glow' : undefined}
               />
+              {/* The name with the title's badge to its right, as in the rows below. */}
               <p
                 className={clsx(
-                  'mt-1.5 w-full truncate text-center text-[11px] font-semibold',
+                  'mt-1.5 flex w-full items-center justify-center gap-1 text-[11px] font-semibold',
                   me ? 'text-arena-amber' : 'text-arena-text',
                 )}
               >
-                {me ? 'ты' : row.displayName}
+                <span className="truncate">{me ? 'ты' : row.displayName}</span>
+                <TierIcon
+                  icon={getRank(row.level).icon}
+                  title={`Звание: ${getRank(row.level).name}`}
+                  className="text-xl"
+                />
               </p>
               <p className="text-[11px] font-bold tabular-nums text-arena-amber">
                 <CountUp value={metric.value(row)} />
@@ -408,7 +415,9 @@ function Row({
       <Avatar name={row.displayName} size="sm" level={row.level} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate text-sm font-semibold" style={{ color: getRank(row.level).color }}>
-          {row.displayName}
+          <span className="truncate">{row.displayName}</span>
+          {/* The title right by the name — the one badge every row has. */}
+          <TierIcon icon={getRank(row.level).icon} title={`Звание: ${getRank(row.level).name}`} className="text-xl" />
           <RankIcons row={row} />
           {delta !== null && (
             <span
@@ -458,7 +467,7 @@ function RankIcons({ row }: { row: LeaderboardRow }) {
   return (
     <span className="flex shrink-0 items-center gap-0.5 text-xs leading-none">
       {row.weekReps > 0 && <span title={`Лига недели: ${league.name}`}>{league.tier.icon}</span>}
-      {strength.min > 0 && <span title={`Сила: ${strength.name}`}>{strength.icon}</span>}
+      {strength.min > 0 && <TierIcon icon={strength.icon} title={`Сила: ${strength.name}`} />}
     </span>
   );
 }

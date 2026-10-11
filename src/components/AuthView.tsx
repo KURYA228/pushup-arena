@@ -1,6 +1,6 @@
 import { readIntroAbout } from '../lib/intro';
-import { oauthError } from '../lib/cloud';
-import { useState } from 'react';
+import { ACCOUNT_EXISTS, oauthError } from '../lib/cloud';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import {
@@ -25,10 +25,25 @@ import { Avatar } from './PlayerBadge';
  * Three states, in the order a returning player meets them: a greeting for a device that already
  * knows you (password only), the full form for a new one, and the wait for a confirmation e-mail.
  * None of it gates the game — signing in only buys a place on the board.
+ *
+ * `signInOnly` is for someone who said they already have an account: the form signs in and has
+ * no way to register.
  */
-export function AuthView({ cloud, onSkip }: { cloud: Cloud; onSkip?: () => void }) {
-  const [identified, setIdentified] = useState(Boolean(cloud.lastAccount));
+export function AuthView({
+  cloud,
+  onSkip,
+  signInOnly = false,
+}: {
+  cloud: Cloud;
+  onSkip?: () => void;
+  signInOnly?: boolean;
+}) {
+  const [identified, setIdentified] = useState(Boolean(cloud.lastAccount) && !cloud.googleExists);
   const [signInAnyway, setSignInAnyway] = useState(false);
+  // "Already exists" is said on the full form; the greeting for a known device has no room for it.
+  useEffect(() => {
+    if (cloud.googleExists) setIdentified(false);
+  }, [cloud.googleExists]);
 
   // Signed in as far as this device is concerned — the server just couldn't be reached. Asking
   // for a password here would be wrong twice over: it isn't needed, and it wouldn't work either.
@@ -38,7 +53,7 @@ export function AuthView({ cloud, onSkip }: { cloud: Cloud; onSkip?: () => void 
     ) : cloud.lastAccount && identified ? (
       <WelcomeBack cloud={cloud} onReject={() => setIdentified(false)} />
     ) : (
-      <FullForm cloud={cloud} />
+      <FullForm cloud={cloud} signInOnly={signInOnly} />
     );
 
   return (
@@ -259,8 +274,10 @@ function WelcomeBack({ cloud, onReject }: { cloud: Cloud; onReject: () => void }
   );
 }
 
-function FullForm({ cloud }: { cloud: Cloud }) {
-  const [mode, setMode] = useState<'in' | 'up'>(cloud.lastAccount ? 'in' : 'up');
+function FullForm({ cloud, signInOnly: startSignInOnly }: { cloud: Cloud; signInOnly: boolean }) {
+  // Sign-in only until the player says they have no account after all.
+  const [signInOnly, setSignInOnly] = useState(startSignInOnly);
+  const [mode, setMode] = useState<'in' | 'up'>(startSignInOnly || cloud.lastAccount ? 'in' : 'up');
   const [email, setEmail] = useState(cloud.lastAccount?.email ?? '');
   const [password, setPassword] = useState('');
   // The nickname given to the host in the intro, as a starting point.
@@ -272,14 +289,51 @@ function FullForm({ cloud }: { cloud: Cloud }) {
   });
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  /**
+   * The account tried at sign-up already exists — by e-mail, or by Google — and the form offers to
+   * sign in with it instead.
+   */
+  const [exists, setExists] = useState<'email' | 'google' | null>(null);
+
+  const switchMode = (m: 'in' | 'up') => {
+    setMode(m);
+    setError(null);
+    setExists(null);
+  };
+
+  // Back from "register with Google" into an account that was already there.
+  const { googleExists, clearGoogleExists } = cloud;
+  useEffect(() => {
+    if (!googleExists) return;
+    setMode('up');
+    setError(ACCOUNT_EXISTS);
+    setExists('google');
+    clearGoogleExists();
+  }, [googleExists, clearGoogleExists]);
+
+  const google = async (intent: 'signup' | 'signin') => {
+    setBusy(true);
+    setError(null);
+    setExists(null);
+    const err = await cloud.googleLogin(intent);
+    // On success the page is already on its way to Google; only a refusal lands here.
+    if (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
 
   const submit = async () => {
     setBusy(true);
     setError(null);
+    setExists(null);
     try {
       if (mode === 'up') {
         const { error: err, needsConfirmation } = await cloud.register(email, password, displayName);
-        if (err) setError(err.message);
+        if (err) {
+          setError(err.message);
+          setExists(err.code === 'exists' ? 'email' : null);
+        }
         else if (needsConfirmation) setAwaitingConfirm(true);
       } else {
         const err = await cloud.login(email, password, displayName);
@@ -305,23 +359,31 @@ function FullForm({ cloud }: { cloud: Cloud }) {
         <br />
         <span className="text-arena-amber">Legends</span>
       </h1>
-      <p className="mt-2.5 text-center text-xs leading-snug text-arena-text-dim">
-        Отжимания — это удары. Пятнадцать боссов, у каждого своя способность, и сорок пять
-        подчинённых по дороге к ним.
-      </p>
+      {signInOnly ? (
+        <p className="mt-3 text-center text-sm leading-snug text-arena-text-dim">
+          С возвращением, воин! Войди в свой аккаунт — прогресс подтянется из облака.
+        </p>
+      ) : (
+        <>
+        <p className="mt-2.5 text-center text-xs leading-snug text-arena-text-dim">
+          Отжимания — это удары. Пятнадцать боссов, у каждого своя способность, и сорок пять
+          подчинённых по дороге к ним.
+        </p>
 
-      <div className="mt-4 flex justify-center gap-2">
-        <Feature icon={Swords} label="15 боссов" />
-        <Feature icon={Camera} label="счёт с камеры" />
-        <Feature icon={Trophy} label="общий зачёт" />
-      </div>
+        <div className="mt-4 flex justify-center gap-2">
+          <Feature icon={Swords} label="15 боссов" />
+          <Feature icon={Camera} label="счёт с камеры" />
+          <Feature icon={Trophy} label="общий зачёт" />
+        </div>
 
-      <p className="mt-4 text-xs leading-snug text-arena-text-dim">
-        Аккаунт нужен только чтобы соревноваться с другими. Без него игра работает полностью —
-        прогресс просто остаётся на этом устройстве.
-      </p>
+        <p className="mt-4 text-xs leading-snug text-arena-text-dim">
+          Аккаунт нужен только чтобы соревноваться с другими. Без него игра работает полностью —
+          прогресс просто остаётся на этом устройстве.
+        </p>
 
-      <Segmented mode={mode} onChange={(m) => { setMode(m); setError(null); }} />
+        <Segmented mode={mode} onChange={switchMode} />
+        </>
+      )}
 
       <form
         className="mt-4"
@@ -360,13 +422,22 @@ function FullForm({ cloud }: { cloud: Cloud }) {
         <RememberSwitch on={cloud.remember} onChange={cloud.setRemember} />
 
         <ErrorLine error={error} />
+        {exists && (
+          <button
+            type="button"
+            onClick={() => (exists === 'google' ? void google('signin') : switchMode('in'))}
+            className="mt-2 w-full text-center text-xs font-semibold text-arena-amber underline"
+          >
+            {exists === 'google' ? 'Войти через Google' : 'Войти с этой почтой'}
+          </button>
+        )}
 
         <PrimaryButton type="submit" disabled={!ready} busy={busy}>
           {mode === 'up' ? 'Создать аккаунт' : 'Войти'}
         </PrimaryButton>
 
         {/* Or skip the form: one Google account does for both signing up and signing in. */}
-        <div className="flex items-center gap-3 text-[11px] text-arena-text-dim">
+        <div className="my-3 flex items-center gap-3 text-[11px] text-arena-text-dim">
           <span className="h-px flex-1 bg-arena-border" />
           или
           <span className="h-px flex-1 bg-arena-border" />
@@ -374,21 +445,25 @@ function FullForm({ cloud }: { cloud: Cloud }) {
         <button
           type="button"
           disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            const err = await cloud.googleLogin();
-            // On success the page is already on its way to Google; only a refusal lands here.
-            if (err) {
-              setError(err.message);
-              setBusy(false);
-            }
-          }}
-          className="flex w-full items-center justify-center gap-2.5 rounded-xl bg-white py-3 text-sm font-semibold text-[#1f1f1f] active:scale-[0.98] disabled:opacity-50"
+          onClick={() => void google(mode === 'up' ? 'signup' : 'signin')}
+          className="btn-3d btn-3d-light w-full gap-2.5 text-base"
         >
           <GoogleMark />
           {mode === 'up' ? 'Зарегистрироваться через Google' : 'Войти через Google'}
         </button>
+
+        {signInOnly && (
+          <button
+            type="button"
+            onClick={() => {
+              setSignInOnly(false);
+              switchMode('up');
+            }}
+            className="mt-4 w-full text-center text-xs text-arena-text-dim"
+          >
+            Нет аккаунта? <span className="font-semibold text-arena-amber underline">Зарегистрироваться</span>
+          </button>
+        )}
       </form>
     </motion.div>
   );
@@ -627,7 +702,7 @@ function PrimaryButton({
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className="arena-glow mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl bg-arena-amber py-3 text-sm font-bold text-black transition-opacity active:scale-[0.98] disabled:opacity-40"
+      className="btn-3d mt-4 w-full gap-1.5"
     >
       {busy ? (
         // Bobs down and up while it waits — a push-up in place of a spinner.

@@ -36,6 +36,20 @@ const FEATHER = 'radial-gradient(ellipse 50% 50% at 50% 50%, #000 76%, transpare
 const BACKDROP =
   'radial-gradient(ellipse 50% 50% at 50% 50%, transparent 30%, rgba(0, 0, 0, 0.88) 86%, #000 100%)';
 
+/** A gentler {@link BACKDROP}, for artwork that is dark to begin with (`light`). */
+const BACKDROP_LIGHT =
+  'radial-gradient(ellipse 50% 50% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.5) 88%, #000 100%)';
+
+/**
+ * For the boss cut: the picture cut to a hard-edged circle, lifted off the black by a dark
+ * shadow round it. Every attempt to dissolve the edge there — an ellipse, a soft rectangle, a circle —
+ * read as a frame of some shape; a clean edge with a shadow reads as a picture.
+ */
+const SHADOWED = {
+  borderRadius: '50%',
+  boxShadow: '0 0 0 2px rgba(0, 0, 0, 0.85), 0 0 22px 8px rgba(0, 0, 0, 0.9), 0 0 60px 18px rgba(0, 0, 0, 0.7)',
+} as const;
+
 /**
  * Artwork for any arena enemy — boss or minion.
  *
@@ -55,6 +69,9 @@ export function EnemyIcon({
   ratio = 1,
   maxShape,
   hug = false,
+  shadowed = false,
+  frame: fixedFrame,
+  light = false,
 }: {
   file: string;
   color: string;
@@ -89,6 +106,16 @@ export function EnemyIcon({
    * whatever comes next sits right under the picture.
    */
   hug?: boolean;
+  /** Bare artwork as a clean circle with a dark shadow round it and no vignette, instead of the oval. */
+  shadowed?: boolean;
+  /**
+   * An exact box, in pixels, for a wide picture to fill (cropped to it), so every wide enemy
+   * comes out the same size. Pictures that are roughly square keep their own fit, unless
+   * `shadowed`, where every picture is cut to the same circle.
+   */
+  frame?: { w: number; h: number };
+  /** Dark artwork: brightened a little and given a lighter vignette. */
+  light?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   /** The picture's own proportions, once the browser has them. */
@@ -114,8 +141,9 @@ export function EnemyIcon({
   const room = Math.max(size, maxWidth ?? size);
   const frame = shape && maxShape ? Math.min(shape, maxShape) : shape;
   const fitW = bare && frame ? Math.min(room, height * frame) : size;
-  const fitH = bare && frame ? Math.round(fitW / frame) : height;
-  const w = Math.round(fitW);
+  const fixed = bare && fixedFrame && shape && (shape >= 1.3 || shadowed) ? fixedFrame : null;
+  const fitH = fixed ? fixed.h : bare && frame ? Math.round(fitW / frame) : height;
+  const w = fixed ? fixed.w : Math.round(fitW);
 
   const img = (
     <img
@@ -149,17 +177,20 @@ export function EnemyIcon({
         // artwork whose proportions aren't known yet — better a moment of letterboxing than
         // a moment with the head cut off.
         objectFit: cutout || (bare && !shape) ? 'contain' : 'cover',
+        ...(light ? { filter: 'brightness(1.15)' } : null),
         ...(cutout
           ? { filter: 'drop-shadow(0 6px 14px rgba(0, 0, 0, 0.55))' }
           : bare
-            ? {
-                // An elliptical fade, so the picture has no edge to read as a frame. No
-                // `screen` blending here: it used to drop the black background of the older
-                // vignette art, but it also bleaches anything bright — a lit street, a sky —
-                // and these illustrations have backgrounds of their own.
-                maskImage: FEATHER,
-                WebkitMaskImage: FEATHER,
-              }
+            ? shadowed
+              ? SHADOWED
+              : {
+                  // An elliptical fade, so the picture has no edge to read as a frame. No
+                  // `screen` blending here: it used to drop the black background of the older
+                  // vignette art, but it also bleaches anything bright — a lit street, a sky —
+                  // and these illustrations have backgrounds of their own.
+                  maskImage: FEATHER,
+                  WebkitMaskImage: FEATHER,
+                }
             : null),
       }}
     />
@@ -178,11 +209,23 @@ export function EnemyIcon({
     >
       <span className="relative block" style={{ width: w, height: fitH }}>
         {img}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-0"
-          style={{ background: BACKDROP, maskImage: FEATHER, WebkitMaskImage: FEATHER }}
-        />
+        {shadowed && (
+          // A little of the shadow inside the edge too, so the picture darkens into it instead
+          // of stopping dead. Drawn over the image rather than masked: a mask would clip the
+          // outer shadow along with the picture.
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-full"
+            style={{ boxShadow: 'inset 0 0 14px 6px rgba(0, 0, 0, 0.85), inset 0 0 34px 10px rgba(0, 0, 0, 0.45)' }}
+          />
+        )}
+        {!shadowed && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{ background: light ? BACKDROP_LIGHT : BACKDROP, maskImage: FEATHER, WebkitMaskImage: FEATHER }}
+          />
+        )}
       </span>
     </span>
   );

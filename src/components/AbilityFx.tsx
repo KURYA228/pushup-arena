@@ -1,9 +1,9 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Burst } from './Burst';
 import type { BossDef } from '../data/bosses';
 import type { AbilityEvent, FightState } from '../data/combat';
-import { CRYSTAL_REPS, END_CRYSTALS, abilityValue, hasAbility } from '../data/abilities';
+import { CRYSTAL_REPS, END_CRYSTALS, PIGGY_EVERY, SET_BREAK_MS, abilityValue, hasAbility } from '../data/abilities';
 
 /**
  * What the bosses' own abilities look like on the fight screen.
@@ -30,6 +30,10 @@ export const STAMPS: Record<AbilityEvent, StampStyle> = {
   'scream-survived': { text: 'ВЫДЕРЖАЛ!', color: '#4ade80', motion: 'slam' },
   crystal: { text: 'КРИСТАЛЛ РАЗБИТ!', color: '#c084fc', motion: 'shatter' },
   covered: { text: 'ТИТАНЫ ПРИКРЫЛИ!', color: '#ef4444', motion: 'slam' },
+  treasury: { text: 'КАЗНА ОТКРЫТА!', color: '#fbbf24', motion: 'slam' },
+  'fee-paid': { text: 'ОПЛАЧЕНО ✓', color: '#4ade80', motion: 'slam' },
+  'bulwark-broken': { text: 'ПАНЦИРЬ ПРОБИТ!', color: '#7dd3fc', motion: 'shatter' },
+  'crit-blocked': { text: 'КРИТ ЗАБЛОКИРОВАН!', color: '#3fa9e0', motion: 'slam' },
 };
 
 /** The big word over the boss. Remount (change `id`) to play it again. */
@@ -90,10 +94,125 @@ function settle(kind: StampStyle['motion']) {
   }
 }
 
+/** Robin, Cyborg, Starfire, Raven, Beast Boy. */
+const TITAN_COLORS = ['#ef4444', '#3b82f6', '#f97316', '#a855f7', '#22c55e'];
+
 /** Chips for what's in force right now. Nothing for a boss with nothing running. */
-export function AbilityStatus({ boss, fight }: { boss: BossDef; fight: FightState }) {
+export function AbilityStatus({ boss, fight, pulse }: { boss: BossDef; fight: FightState; /** Changes when the chip for what just happened should flash. */ pulse?: number }) {
   const chips: { key: string; node: ReactNode; color: string }[] = [];
   const a = boss.abilities;
+
+  // Krabs' fee is owed again after every pause, and nothing re-renders the screen when a pause
+  // crosses the line — so while he's up, look at the clock twice a second.
+  const fee = abilityValue(a, 'entryFee');
+  const team = abilityValue(a, 'teamwork');
+  const tribute = abilityValue(a, 'tribute');
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!fee && !team && !tribute) return;
+    const id = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [fee, team, tribute]);
+  const inSet = fight.lastRepAt != null && now - fight.lastRepAt < SET_BREAK_MS;
+
+  // The tsar's tribute: a coin lights for each rep of the set, and the last one — the rep that
+  // goes to the treasury — glows red when it's next.
+  if (tribute) {
+    const done = inSet ? fight.setReps % tribute : 0;
+    const next = done === tribute - 1;
+    chips.push({
+      key: 'tribute',
+      color: next ? '#f87171' : '#fbbf24',
+      node: (
+        <span className="inline-flex items-center gap-[3px]">
+          дань
+          {Array.from({ length: tribute }, (_, i) => (
+            <span
+              key={i}
+              className="inline-block h-2.5 w-2.5 rounded-full border"
+              style={{
+                borderColor: i === tribute - 1 ? '#f87171' : '#fbbf24',
+                background: i < done ? '#fbbf24' : i === tribute - 1 && next ? '#ef4444' : 'transparent',
+                boxShadow: i === tribute - 1 && next ? '0 0 6px #ef4444' : undefined,
+              }}
+            />
+          ))}
+        </span>
+      ),
+    });
+  }
+
+  // Robin's Titans: one light per rep of the set, in their colours; once the set's long enough
+  // they can't cover him any more.
+  if (team) {
+    const done = inSet ? Math.min(team, fight.setReps) : 0;
+    chips.push({
+      key: 'titans',
+      color: done >= team ? '#4ade80' : '#fca5a5',
+      node:
+        done >= team ? (
+          <>✓ Титаны не помогут</>
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            подход
+            {TITAN_COLORS.slice(0, team).map((c, i) => (
+              <span
+                key={c}
+                className="inline-block h-2.5 w-2.5 rounded-full border border-white/60"
+                style={{ background: i < done ? c : 'transparent', boxShadow: i < done ? `0 0 6px ${c}` : undefined }}
+              />
+            ))}
+          </span>
+        ),
+    });
+  }
+  if (fee) {
+    const owed = inSet ? Math.max(0, fee - fight.setReps) : fee;
+    chips.push(
+      owed > 0
+        ? { key: 'fee', color: '#fbbf24', node: <>🪙 вход: {owed}</> }
+        : { key: 'fee', color: '#4ade80', node: <>✓ оплачено</> },
+    );
+  }
+
+  // The pig's nest: an egg goes dark with each rep, and the rep that would take the last one is
+  // the one he steals. Counted over the whole fight, as the ability is.
+  if (hasAbility(a, 'piggyBank')) {
+    const left = PIGGY_EVERY - (fight.repsOnEnemy % PIGGY_EVERY);
+    chips.push({
+      key: 'nest',
+      color: left === 1 ? '#f87171' : '#a3e635',
+      node: (
+        <>
+          гнездо{' '}
+          {Array.from({ length: PIGGY_EVERY }, (_, i) => (
+            <span key={i} className={i < left ? '' : 'opacity-25 grayscale'}>
+              🥚
+            </span>
+          ))}
+        </>
+      ),
+    });
+  }
+
+  // The Joker's card: a standing reminder that crits work against you here, flashing when one
+  // just did.
+  if (hasAbility(a, 'jokerCard')) {
+    chips.push({
+      key: `joker-${pulse ?? 0}`,
+      color: '#c084fc',
+      node: (
+        <motion.span
+          className="inline-block"
+          initial={pulse ? { scale: 1.5, color: '#4ade80' } : false}
+          animate={{ scale: 1, color: '#c084fc' }}
+          transition={{ duration: 0.6 }}
+        >
+          🃏 криты лечат его!
+        </motion.span>
+      ),
+    });
+  }
 
   const frozen = fight.frozenLeft ?? 0;
   if (frozen > 0) chips.push({ key: 'frozen', color: '#7dd3fc', node: <>❄ заморожено: {frozen}</> });
@@ -132,6 +251,9 @@ export function AbilityStatus({ boss, fight }: { boss: BossDef; fight: FightStat
         ),
     });
   }
+
+  const guard = fight.guardLeft ?? 0;
+  if (guard > 0) chips.push({ key: 'guard', color: '#fbbf24', node: <>🛡 богатыри: {guard}</> });
 
   if (hasAbility(a, 'retreat') && fight.retreatUsed) {
     chips.push({ key: 'retreat', color: '#a3a3a3', node: <>отступление потрачено</> });

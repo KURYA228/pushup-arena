@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useProfile } from './hooks/useProfile';
 import { useFeedback } from './hooks/useFeedback';
@@ -14,12 +14,13 @@ import { RushView } from './components/RushView';
 import { LeaderboardView } from './components/LeaderboardView';
 import { StatsView } from './components/StatsView';
 import { AuthView } from './components/AuthView';
-import { Intro } from './components/Intro';
+import { Intro, type IntroExit } from './components/Intro';
 import { SyncGate } from './components/SyncGate';
 import { hasSeenIntro } from './lib/intro';
 import { useCloud } from './hooks/useCloud';
 import { DevPanel } from './components/DevPanel';
 import { onDevPanelOpen } from './lib/devGate';
+import { DEV_SCENE_EVENT } from './lib/devScene';
 import { isAdmin } from './lib/cloud';
 
 function App() {
@@ -28,6 +29,8 @@ function App() {
   const [entered, setEntered] = useState(false);
   /** The cold open, first launch only. Read once so it can't flicker back mid-session. */
   const [introDone, setIntroDone] = useState(hasSeenIntro);
+  /** "Already have an account" in the intro: the front door then offers signing in, nothing else. */
+  const [signInOnly, setSignInOnly] = useState(false);
   /** Opened from anywhere through the dev gate (src/lib/devGate.ts), so it lives up here. */
   const [devOpen, setDevOpen] = useState(false);
   // In a published build the gesture alone opens nothing: the account must also be an admin,
@@ -41,6 +44,12 @@ function App() {
       }),
     [],
   );
+  // A scene asked for from the dev panel plays on the fight screen, so go there.
+  useEffect(() => {
+    const toFight = () => setView('boss');
+    window.addEventListener(DEV_SCENE_EVENT, toFight);
+    return () => window.removeEventListener(DEV_SCENE_EVENT, toFight);
+  }, []);
   const {
     profile,
     derived,
@@ -65,9 +74,29 @@ function App() {
   // Keep the screen alive on the two screens where you're actually working out.
   useWakeLock(view === 'boss' || view === 'rush');
 
+  // Signing out, wherever it was done from, lands on the home screen rather than leaving you on
+  // the tab you signed out on.
+  const hadSession = useRef(false);
+  useEffect(() => {
+    if (cloud.session) hadSession.current = true;
+    else if (hadSession.current) {
+      hadSession.current = false;
+      setView('home');
+    }
+  }, [cloud.session]);
+
   // The cold open goes before everything, including the loading state — it's the first thing
   // anyone sees, and the session can settle behind it.
-  if (!introDone) return <Intro onDone={() => setIntroDone(true)} />;
+  if (!introDone) {
+    return (
+      <Intro
+        onDone={(exit: IntroExit) => {
+          setSignInOnly(exit === 'signin');
+          setIntroDone(true);
+        }}
+      />
+    );
+  }
 
   // Wait for the session before drawing anything: showing the game and then replacing it with a
   // welcome screen half a second later is worse than a moment of nothing.
@@ -86,7 +115,7 @@ function App() {
   if (cloud.configured && !cloud.session && !cloud.unreachable && !entered) {
     return (
       <div className="safe-top safe-x safe-bottom min-h-screen overflow-y-auto bg-arena-bg">
-        <AuthView cloud={cloud} onSkip={() => setEntered(true)} />
+        <AuthView cloud={cloud} signInOnly={signInOnly} onSkip={() => setEntered(true)} />
       </div>
     );
   }

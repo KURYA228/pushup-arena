@@ -7,6 +7,7 @@ import {
   NO_STOP_MS,
   PIGGY_EVERY,
   SET_BREAK_MS,
+  TREASURY_GUARD,
   abilityValue,
   critLands,
   damageDealt,
@@ -68,6 +69,10 @@ export interface FightState {
   scream?: { hp: number; reps: number } | null;
   /** "Кристаллы Края" broken so far. */
   crystalsBroken?: number;
+  /** "Казна" is spent. */
+  treasuryUsed?: boolean;
+  /** Blows still softened by the bogatyrs the treasury paid for. */
+  guardLeft?: number;
 }
 
 export interface ArenaState {
@@ -88,6 +93,7 @@ export type BlockedReason =
   | 'frozen'
   | 'slacking'
   | 'joke'
+  | 'tribute'
   | null;
 
 /**
@@ -102,7 +108,11 @@ export type AbilityEvent =
   | 'scream-burned' // A pause during the scream burned the damage done since.
   | 'scream-survived' // Enough reps without a pause: the scream is over.
   | 'crystal' // An End crystal broke.
-  | 'covered'; // A short set: the Titans covered Robin, damage undone.
+  | 'covered' // A short set: the Titans covered Robin, damage undone.
+  | 'treasury' // The tsar opened the treasury and hired the bogatyrs.
+  | 'fee-paid' // The last rep of Krabs' entry fee: the set is paid for, the rest land.
+  | 'bulwark-broken' // HP fell through 60%: "Панцирь" no longer softens the blows.
+  | 'crit-blocked'; // The roll was a crit, and "Стальная воля" turned it into a plain blow.
 
 export interface RepOutcome {
   next: ArenaState;
@@ -143,6 +153,8 @@ export function freshFight(enemyHp: number): FightState {
     screamUsed: false,
     scream: null,
     crystalsBroken: 0,
+    treasuryUsed: false,
+    guardLeft: 0,
   };
 }
 
@@ -205,6 +217,8 @@ function startEncounter(state: ArenaState, bossIndex: number, step: number, carr
       screamUsed: false,
       scream: null,
       crystalsBroken: 0,
+      treasuryUsed: false,
+      guardLeft: 0,
     },
   };
 }
@@ -321,6 +335,7 @@ export function resolveArenaRep(
     blocked = 'frozen';
   } else if (enemy.isBoss && hasAbility(abilities, 'entryFee') && fight.setReps <= abilityValue(abilities, 'entryFee')) {
     blocked = 'fee';
+    if (fight.setReps === abilityValue(abilities, 'entryFee')) events.push('fee-paid');
   } else if (
     enemy.isBoss &&
     hasAbility(abilities, 'strictMom') &&
@@ -330,6 +345,14 @@ export function resolveArenaRep(
     // Any pause that long, rest or not — she doesn't do breaks. Only the first fight rep is
     // exempt, since there's nothing before it to have paused after.
     blocked = 'slacking';
+  } else if (
+    enemy.isBoss &&
+    hasAbility(abilities, 'tribute') &&
+    fight.setReps % abilityValue(abilities, 'tribute') === 0
+  ) {
+    // "Дань": counted by the set, so a long set pays more of it than a short one — but the
+    // first six of every set are always yours.
+    blocked = 'tribute';
   } else if (enemy.isBoss && hasAbility(abilities, 'piggyBank') && fight.repsOnEnemy % PIGGY_EVERY === 0) {
     const max = fight.enemyMaxHp;
     const after = Math.min(max, enemyHp + Math.max(1, Math.round(max * abilityValue(abilities, 'piggyBank'))));
@@ -341,7 +364,9 @@ export function resolveArenaRep(
   let isCrit = false;
   let damage = 0;
   if (!blocked) {
-    isCrit = critLands(abilities, roll < boss.critChance + perks.critBonus);
+    const rolled = roll < boss.critChance + perks.critBonus;
+    isCrit = critLands(abilities, rolled);
+    if (rolled && !isCrit && enemy.isBoss) events.push('crit-blocked');
     const hit = damageDealt(
       boss.baseDamage * perks.damageMult,
       boss.critMultiplier + perks.critMultBonus,
@@ -362,8 +387,19 @@ export function resolveArenaRep(
       if (enemy.isBoss && hasAbility(abilities, 'endCrystals') && (fight.crystalsBroken ?? 0) < END_CRYSTALS) {
         damage = Math.max(1, Math.round(damage * CRYSTAL_SHIELD));
       }
+      // "Казна": the bogatyrs he paid take half of every blow, for as long as they're paid for.
+      if (enemy.isBoss && (fight.guardLeft ?? 0) > 0) {
+        damage = Math.max(1, Math.round(damage * TREASURY_GUARD));
+        fight.guardLeft = (fight.guardLeft ?? 0) - 1;
+      }
+      const before = enemyHp;
       enemyHp -= damage;
       fight.damageThisSet += damage;
+      // "Панцирь" holds above 60% HP; the blow that takes him through it breaks it.
+      const line = fight.enemyMaxHp * 0.6;
+      if (enemy.isBoss && hasAbility(abilities, 'bulwark') && before > line && enemyHp <= line && enemyHp > 0) {
+        events.push('bulwark-broken');
+      }
     }
   }
 
@@ -385,7 +421,7 @@ export function resolveArenaRep(
     } else fight.scream = { ...fight.scream, reps };
   }
 
-  // --- below half: Skipper falls back, Freddy jumps out -----------------------------------
+  // --- below half: Skipper falls back, Freddy jumps out, the tsar opens his treasury -----
   const belowHalf = enemyHp > 0 && fight.enemyMaxHp > 0 && enemyHp < fight.enemyMaxHp * HALF_HP;
   if (belowHalf && enemy.isBoss && hasAbility(abilities, 'retreat') && !fight.retreatUsed) {
     const after = Math.min(fight.enemyMaxHp, enemyHp + Math.round(fight.enemyMaxHp * abilityValue(abilities, 'retreat')));
@@ -398,6 +434,12 @@ export function resolveArenaRep(
     fight.screamUsed = true;
     fight.scream = { hp: enemyHp, reps: 0 };
     events.push('scream');
+  }
+
+  if (belowHalf && enemy.isBoss && hasAbility(abilities, 'treasury') && !fight.treasuryUsed) {
+    fight.treasuryUsed = true;
+    fight.guardLeft = abilityValue(abilities, 'treasury');
+    events.push('treasury');
   }
 
   // --- "Заражение": a minion that outlives its welcome leaks HP into the next one ---------

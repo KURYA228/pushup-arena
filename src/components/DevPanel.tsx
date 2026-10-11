@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { TierIcon } from './TierIcon';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import type { ProfileRecord } from '../types';
@@ -28,6 +29,46 @@ import { announceRankUps } from '../lib/rankEvents';
 import { weekRepsNow } from '../lib/training';
 import { weekKey } from '../lib/weekly';
 import { resetBriefed } from './BossBriefing';
+import { requestDevScene, type DevScene } from '../lib/devScene';
+
+/** Every ability scene, by whose it is, for the "play it" buttons. */
+const DEV_SCENES: { label: string; kind: DevScene }[] = [
+  { label: 'Заставка BOSS', kind: 'boss-intro' },
+  { label: 'Крабс: касса', kind: 'coins' },
+  { label: 'Крабс: смерть', kind: 'coin-spill' },
+  { label: 'Свин: яйцо', kind: 'egg' },
+  { label: 'Свин: крепость', kind: 'planks' },
+  { label: 'Свин: пуф', kind: 'pig-poof' },
+  { label: 'Грю: заморозка', kind: 'freeze' },
+  { label: 'Грю: лёд', kind: 'ice-chip' },
+  { label: 'Грю: лёд разбит', kind: 'ice-shatter' },
+  { label: 'Грю: миньон-вор', kind: 'minion-thief' },
+  { label: 'Грю: смерть', kind: 'minions-carry' },
+  { label: 'Шкипер: отступ', kind: 'retreat' },
+  { label: 'Шкипер: смерть', kind: 'penguins-wave' },
+  { label: 'Николь: тапок', kind: 'slipper' },
+  { label: 'Николь: блок', kind: 'karate-block' },
+  { label: 'Николь: смерть', kind: 'dizzy' },
+  { label: 'Фредди: скример', kind: 'scream' },
+  { label: 'Скример сгорел', kind: 'scream-burned' },
+  { label: 'Фредди: 6 утра', kind: 'scream-survived' },
+  { label: 'Фредди: смерть', kind: 'power-out' },
+  { label: 'Джокер: карта', kind: 'cards' },
+  { label: 'Джокер: цветок', kind: 'acid-flower' },
+  { label: 'Джокер: смерть', kind: 'jack-box' },
+  { label: 'Робин: Титаны', kind: 'covered' },
+  { label: 'Робин: шест', kind: 'staff-block' },
+  { label: 'Робин: смерть', kind: 'smoke-cape' },
+  { label: 'Царь: дань', kind: 'tribute' },
+  { label: 'Царь: казна', kind: 'treasury' },
+  { label: 'Царь: смерть', kind: 'crown-roll' },
+  { label: 'Эндер: кристалл', kind: 'crystal' },
+  { label: 'Эндер: опыт', kind: 'xp-orbs' },
+  { label: 'Эндер: заражение', kind: 'infect-pass' },
+  { label: 'Эндер: крипер', kind: 'creeper-boom' },
+  { label: 'Эндер: рёв', kind: 'dragon-roar' },
+  { label: 'Эндер: смерть', kind: 'ender-death' },
+];
 
 /**
  * Debug controls for jumping around the game state without grinding reps. Writes go through the
@@ -194,7 +235,7 @@ export function DevPanel({
                   getRank(level) === r ? 'bg-arena-amber/20 text-arena-amber' : 'bg-arena-surface-2 text-arena-text-dim'
                 }`}
               >
-                {r.icon} {r.name}
+                <TierIcon icon={r.icon} /> {r.name}
               </button>
             ))}
           </div>
@@ -248,6 +289,26 @@ export function DevPanel({
           </p>
         </Group>
 
+        <Group title="Анимации — сыграть на экране боя">
+          <div className="grid grid-cols-3 gap-2">
+            {DEV_SCENES.map((d) => (
+              <Action
+                key={d.kind}
+                onClick={() => {
+                  onClose();
+                  requestDevScene(d.kind);
+                }}
+              >
+                {d.label}
+              </Action>
+            ))}
+          </div>
+          <p className="text-[10px] leading-snug text-arena-text-dim">
+            Панель закроется, откроется бой, и сцена сыграет поверх текущего противника — урон и
+            HP не меняются.
+          </p>
+        </Group>
+
         <Group title={`Бой — HP врага ${profile.enemyHp}${profile.replay ? ' · идёт реванш' : ''}`}>
           <NumberField
             label="HP врага"
@@ -267,6 +328,8 @@ export function DevPanel({
                     screamUsed: false,
                     scream: null,
                     crystalsBroken: 0,
+                    treasuryUsed: false,
+                    guardLeft: 0,
                     lastRepAt: null,
                     setReps: 0,
                     repsOnEnemy: 0,
@@ -292,8 +355,8 @@ export function DevPanel({
             </Row>
           )}
           <p className="text-[10px] leading-snug text-arena-text-dim">
-            HP — чтобы проверить то, что срабатывает на половине здоровья (Шкипер, Фредди).
-            «Сбросить способности» — кристаллы, заморозка, скример, отступление и счёт повторов боя
+            HP — чтобы проверить то, что срабатывает на половине здоровья (Шкипер, Фредди, Царь).
+            «Сбросить способности» — кристаллы, заморозка, скример, отступление, казна и счёт повторов боя
             с нуля. «Разведку — заново» — досье на каждого босса снова всплывёт само.
           </p>
         </Group>

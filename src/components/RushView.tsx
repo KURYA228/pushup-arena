@@ -328,15 +328,15 @@ export function RushView({
       )}
 
       {state === 'idle' && (
-        <motion.button
-          onClick={startSession}
-          whileTap={{ scale: 0.95 }}
+        // The pulse moves a wrapper: the button's own transform is its press.
+        <motion.div
           animate={calm ? {} : { scale: [1, 1.03, 1] }}
           transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
-          className="arena-glow w-full rounded-xl bg-arena-amber py-3 text-sm font-bold text-black"
         >
-          Начать Rush
-        </motion.button>
+          <button onClick={startSession} className="btn-3d w-full">
+            Начать Rush
+          </button>
+        </motion.div>
       )}
       {/* Step two of the way into the dev panel: an invisible patch under the start button.
           Not announced to screen readers and out of the tab order — it isn't a control. */}
@@ -371,7 +371,7 @@ export function RushView({
           </p>
           <button
             onClick={startSession}
-            className="arena-glow w-full rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-95"
+            className="btn-3d w-full"
           >
             Ещё раз
           </button>

@@ -16,9 +16,9 @@ export interface MinionDef {
 }
 
 /** Named rep cues a stage can ask for instead of the default. */
-export type HitSound = 'coins' | 'oink' | 'hurt' | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer';
+export type HitSound = 'coins' | 'oink' | 'hurt' | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace';
 /** Recorded lines a boss can say as he walks out (files under `public/sfx/lines/`). */
-export type BossLine = 'lineKrabs' | 'linePig' | 'lineGru' | 'lineSkipper' | 'lineNicole' | 'lineRobin' | 'lineFreddy' | 'lineJoker' | 'lineEnder';
+export type BossLine = 'lineKrabs' | 'linePig' | 'lineGru' | 'lineSkipper' | 'lineNicole' | 'lineRobin' | 'lineFreddy' | 'lineJoker' | 'lineEnder' | 'lineTsar';
 
 export interface BossDef {
   /**
@@ -65,6 +65,12 @@ export interface BossDef {
   /** What makes this fight different. Minions never have any. */
   abilities: BossAbility[];
   minions: MinionDef[];
+  /**
+   * The stage's artwork is dark with the figure drawn right up to the top edge, so on the fight
+   * screen it gets a lighter vignette and a touch of brightness — the usual one put his head
+   * in shadow. Boss and minions alike.
+   */
+  artLight?: boolean;
 }
 
 /** Share of the stage budget taken by each minion, then by the boss. Sums to 1. */
@@ -88,6 +94,7 @@ interface RawBoss {
   line?: BossLine;
   abilities: BossAbility[];
   minions: [string, string, string];
+  artLight?: boolean;
 }
 
 const RAW: RawBoss[] = [
@@ -188,7 +195,7 @@ const RAW: RawBoss[] = [
     // the show's theme as she walks out.
     hitSound: 'claws',
     line: 'lineNicole',
-    abilities: [{ kind: 'critImmune', value: 1 }, { kind: 'strictMom', value: 3000 }],
+    abilities: [{ kind: 'critImmune', value: 1 }, { kind: 'strictMom', value: 5000 }],
     minions: ['Анаис', 'Дарвин', 'Гамбол'],
   },
   {
@@ -253,19 +260,26 @@ const RAW: RawBoss[] = [
     minions: ['Бист Бой', 'Киборг', 'Старфайр'],
   },
   {
+    // Id kept; Kyiv's court moves in, from «Три богатыря».
     id: 'bloodking',
-    name: 'Багровый Царь',
-    nameGenitive: 'Багрового Царя',
-    title: 'Тот, кому платят кровью',
-    phrase: 'Ты качаешь мышцы. Я собираю с них дань.',
+    name: 'Царь Владимир',
+    nameGenitive: 'Царя Владимира',
+    title: 'Казна пуста — качай',
+    phrase: 'Антипка! Готовь казну!',
     budget: 2200,
     baseDamage: 10,
     critChance: 0.21,
     critMultiplier: 2.8,
-    color: '#8b1e2d',
+    color: '#c8961e',
     icon: '09-bloodking.jpg',
-    abilities: [{ kind: 'enrage', value: 0.4 }, { kind: 'regen', value: 0.015 }],
-    minions: ['Кровопуск', 'Десятник', 'Сборщик дани'],
+    // A bogatyr's mace on a shield, ringing like a church bell, on every rep (synthesised,
+    // `maceClang` in src/lib/feedback.ts); the opening of «Три девицы» as he walks out — up to
+    // the girls' first words.
+    hitSound: 'mace',
+    line: 'lineTsar',
+    abilities: [{ kind: 'tribute', value: 7 }, { kind: 'treasury', value: 10 }],
+    minions: ['Алёша Попович', 'Добрыня Никитич', 'Илья Муромец'],
+    artLight: true,
   },
   {
     id: 'stormborn',
@@ -343,7 +357,8 @@ const RAW: RawBoss[] = [
     critMultiplier: 3.2,
     color: '#6d28d9',
     icon: '14-threshold.jpg',
-    abilities: [{ kind: 'enrage', value: 0.5 }, { kind: 'bloodDebt', value: 0.2 }],
+    // Regeneration moved here from the ninth stage when the tsar got abilities of his own.
+    abilities: [{ kind: 'regen', value: 0.015 }, { kind: 'bloodDebt', value: 0.2 }],
     minions: ['Дрожь', 'Судорога', 'Жжение'],
   },
   {
@@ -383,6 +398,7 @@ export const BOSSES: BossDef[] = RAW.map((r, index) => ({
   hitSound: r.hitSound,
   line: r.line,
   abilities: r.abilities,
+  artLight: r.artLight,
   minions: r.minions.map((name, i) => ({
     id: `${r.id}-m${i + 1}`,
     name,

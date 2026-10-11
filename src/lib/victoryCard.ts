@@ -39,7 +39,7 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
   });
 }
 
-/** Shrinks the font until the line fits — boss names run from «Мор» to «Багровый Царь». */
+/** Shrinks the font until the line fits — boss names run from «Мор» to «Царь Владимир». */
 function fitText(ctx: CanvasRenderingContext2D, text: string, weight: number, max: number, width: number) {
   let size = max;
   do {

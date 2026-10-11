@@ -132,13 +132,14 @@ const SAMPLES = {
   linePig: 'sfx/lines/pig.m4a',
   lineGru: 'sfx/lines/gru.m4a',
   lineSkipper: 'sfx/lines/skipper.m4a',
+  lineTsar: 'sfx/lines/tsar.m4a',
 } as const;
 type SampleName = keyof typeof SAMPLES;
 
 /** The ones a stage can name as its rep cue; the rest belong to a particular moment. */
 export type RepSample = Extract<SampleName, 'coins' | 'oink' | 'hurt'>;
 /** Every rep cue a stage can ask for: a recording, or one synthesised here. */
-export type RepCue = RepSample | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer';
+export type RepCue = RepSample | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace';
 /** A boss's spoken line, played once as he walks out — see `playBossEncounter`. */
 export type BossLine = Extract<SampleName, `line${string}`>;
 
@@ -626,6 +627,37 @@ function joyBuzzer(c: AudioContext, peak: number) {
   hit(c, 4200 * k, 3, 0.03, dur - 0.04, peak * 0.3);
 }
 
+/**
+ * Tsar Vladimir's bogatyrs at work: a heavy swing, then a mace landing on an iron shield — a dull
+ * thud for the weight, a bright clang for the metal, and a short ring of bell partials on top,
+ * like the Kyiv bells. The bell's ratios (1 / 2 / 2.4 / 3) are a church bell's own — a minor
+ * third in the middle, which is what makes it a bell and not a gong. Every third blow or so is
+ * the shield ringing out a little longer, so a set isn't one clang forty times. Under a quarter
+ * of a second, re-rolled every call.
+ */
+function maceClang(c: AudioContext, peak: number) {
+  const k = 0.9 + Math.random() * 0.2;
+  const ring = Math.random() < 0.35 ? 1.6 : 1;
+  // The swing.
+  swish(c, 500 * k, 1800 * k, 0, 0.08, 1.1, peak * 0.3);
+  const at = 0.07;
+  // Weight: a low thump dropping away.
+  sweep(c, 150 * k, 55, at, 0.12, peak * 0.9, 'sine');
+  hit(c, 700 * k, 1.2, at, 0.05, peak * 0.7);
+  // Metal: a hard bright crack.
+  hit(c, 3600 * k, 1.4, at, 0.03, peak * 0.8);
+  // The ring.
+  const bell = 520 * k;
+  for (const [ratio, gain, dur] of [
+    [1, 0.5, 0.2],
+    [2, 0.35, 0.16],
+    [2.4, 0.3, 0.14],
+    [3, 0.2, 0.1],
+  ] as const) {
+    sweep(c, bell * ratio, bell * ratio * 0.997, at, dur * ring, peak * gain, 'sine');
+  }
+}
+
 /** A counted rep. Crits get their own cue so you can hear one without looking at the screen. */
 export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepCue) {
   if (crit) {
@@ -645,6 +677,7 @@ export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepCue) {
       else if (sound === 'staff') staffStrike(c, 0.32);
       else if (sound === 'honk') noseHonk(c, 0.3);
       else if (sound === 'buzzer') joyBuzzer(c, 0.3);
+      else if (sound === 'mace') maceClang(c, 0.3);
       else if (sound) {
         loadSample(c, sound);
         if (!playSample(c, sound, 0.5)) {
@@ -725,6 +758,558 @@ export function playPurchase(prefs: FeedbackPrefs) {
     }
   }
   buzz(prefs, [18, 60, 28]);
+}
+
+/**
+ * Krabs' entry fee, paid in full: an old till's "ka-ching" — the clack of the key, the drawer
+ * rattling out, and the bell. Held back a beat so it lands after the rep's own coins, not on them.
+ */
+export function playFeePaid(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      const at = 0.12;
+      // The key going down.
+      hit(c, 2600, 3, at, 0.025, 0.25);
+      sweep(c, 320, 180, at, 0.04, 0.2, 'square');
+      // The drawer.
+      swish(c, 1800, 900, at + 0.04, 0.16, 2.5, 0.12);
+      // The bell: two bright strikes a hair apart.
+      bell(c, 2093, at + 0.07, 0.5, 0.2); // C7
+      bell(c, 2637, at + 0.09, 0.6, 0.16); // E7
+    }
+  }
+  buzz(prefs, [16, 40, 30]);
+}
+
+/**
+ * A plank of the pig's fort giving way: a sharp crack, then a short splintering crackle and the
+ * knock of the wood. Kept quiet — it rides on top of the rep's own oink.
+ */
+export function playWoodCrack(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const k = 0.9 + Math.random() * 0.2;
+  hit(c, 2200 * k, 1.2, 0.04, 0.03, 0.22);
+  for (let i = 0; i < 4; i += 1) hit(c, (1400 + Math.random() * 1800) * k, 4, 0.06 + i * 0.022, 0.02, 0.12);
+  sweep(c, 260 * k, 140 * k, 0.04, 0.09, 0.18, 'triangle');
+}
+
+/**
+ * The pig going pop, as they do in the game: a soft, low "pff" of a cloud bursting — noise that
+ * falls in pitch — with a little squeak riding on the front of it.
+ */
+export function playPoof(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 1600, 180, 0.05, 0.45, 0.8, 0.45);
+  sweep(c, 140, 60, 0.05, 0.25, 0.35, 'sine');
+  sweep(c, 900, 1400, 0, 0.08, 0.08, 'triangle');
+}
+
+/* --------------------------- Эндер-дракон --------------------------- */
+
+/** XP orbs being picked up, Minecraft-style: a quick run of bright, rising pings. */
+export function playXpOrbs(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 5; i += 1) {
+    const f = 1400 + Math.random() * 900;
+    sweep(c, f, f * 1.08, i * 0.07, 0.08, 0.07, 'sine');
+  }
+}
+
+/** A blocky explosion: a deep boom and the crackle of debris. */
+export function playExplosion(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  hit(c, 300, 0.4, 0, 0.6, 0.55);
+  sweep(c, 110, 35, 0, 0.6, 0.5, 'sine');
+  for (let i = 0; i < 6; i += 1) hit(c, 1500 + Math.random() * 2000, 2, 0.1 + Math.random() * 0.4, 0.03, 0.08);
+}
+
+/** An arrow: the twang of the bow, the whistle, and the thunk. */
+export function playArrow(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 220, 180, 0, 0.12, 0.12, 'triangle');
+  swish(c, 2400, 3600, 0.02, 0.25, 4, 0.08);
+  hit(c, 800, 2, 0.28, 0.05, 0.2);
+}
+
+/** A creeper about to go: the long rising hiss of the fuse. */
+export function playCreeperHiss(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 2500, 6000, 0, 1.1, 0.7, 0.2);
+}
+
+/** The Ender Dragon dying: a long, falling roar that dissolves into a hum. */
+export function playDragonDeath(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 220, 60, 0, 2.2, 0.25, 'sawtooth');
+  sweep(c, 330, 90, 0.05, 2, 0.12, 'square');
+  hit(c, 500, 0.6, 0, 1.5, 0.15);
+}
+
+/** The End portal opening: a low, wavering hum with a shimmer on top. */
+export function playPortal(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (const f of [110, 111.5, 165]) sweep(c, f, f, 0, 1.6, 0.08, 'sine');
+  for (let i = 0; i < 8; i += 1) sweep(c, 2000 + i * 180, 2000 + i * 180, 0.2 + i * 0.12, 0.2, 0.03, 'sine');
+}
+
+/** The dragon's roar: a growl rising and breaking, with breath behind it. */
+export function playRoar(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 90, 180, 0, 0.35, 0.3, 'sawtooth');
+  sweep(c, 180, 70, 0.35, 0.8, 0.28, 'sawtooth');
+  sweep(c, 140, 260, 0, 0.4, 0.12, 'square');
+  hit(c, 700, 0.5, 0, 1.1, 0.2);
+}
+
+/** An Enderman teleporting: a warped, falling "vwoop". */
+export function playTeleport(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 900, 200, 0, 0.35, 0.12, 'sine');
+  sweep(c, 1350, 300, 0, 0.35, 0.06, 'triangle');
+}
+
+/** Victory: a bright fanfare climbing to a held chord. */
+export function playFanfare(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const notes: [number, number][] = [[523.3, 0], [659.3, 0.15], [784, 0.3], [1046.5, 0.45]];
+  for (const [f, at] of notes) {
+    sweep(c, f, f, at, 0.25, 0.16, 'square');
+    sweep(c, f / 2, f / 2, at, 0.25, 0.08, 'triangle');
+  }
+  for (const f of [1046.5, 1318.5, 1568]) sweep(c, f, f, 0.65, 1.2, 0.08, 'triangle');
+}
+
+/* ------------------------------ Царь ------------------------------ */
+
+/** A strum across the gusli: plucked strings, low to high, a hair apart. */
+export function playGusli(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const notes = [196, 246.9, 293.7, 392, 493.9, 587.3];
+  notes.forEach((f, i) => {
+    const at = i * 0.035;
+    sweep(c, f, f * 0.998, at, 0.7, 0.07, 'triangle');
+    sweep(c, f * 2, f * 2, at, 0.3, 0.025, 'sine');
+    hit(c, f * 6, 3, at, 0.01, 0.03);
+  });
+}
+
+/** Antipka's quill: a quick scratchy scribble. */
+export function playQuill(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 6; i += 1) hit(c, 4500 + Math.random() * 2500, 4, i * 0.06 + Math.random() * 0.02, 0.04, 0.05);
+}
+
+/** Church bells ringing out: a big low bell and the smaller ones chiming over it. */
+export function playBells(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 3; i += 1) {
+    bell(c, 196, i * 0.7, 2, 0.18);
+    bell(c, 196 * 2.4, i * 0.7, 1.4, 0.05);
+  }
+  const small = [784, 988, 880, 1175, 988, 784, 1047, 880];
+  small.forEach((f, i) => bell(c, f, 0.2 + i * 0.22, 0.6, 0.06));
+}
+
+/** A firework of the salute bursting overhead. */
+export function playSalute(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  hit(c, 700, 0.5, 0, 0.12, 0.3);
+  sweep(c, 140, 50, 0, 0.3, 0.3, 'sine');
+  for (let i = 0; i < 8; i += 1) hit(c, 3000 + Math.random() * 4000, 3, 0.15 + Math.random() * 0.35, 0.02, 0.06);
+}
+
+/* ------------------------------ Робин ------------------------------ */
+
+/** Cyborg's sonic cannon: a whine charging up, then the blast. */
+export function playSonicCannon(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 300, 1800, 0, 0.25, 0.12, 'sawtooth');
+  sweep(c, 220, 90, 0.25, 0.3, 0.4, 'square');
+  hit(c, 900, 0.6, 0.25, 0.25, 0.3);
+}
+
+/** Starfire's starbolts: three bright, bubbly zaps. */
+export function playStarbolts(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 3; i += 1) {
+    const at = i * 0.11;
+    sweep(c, 1800, 600, at, 0.12, 0.14, 'triangle');
+    sweep(c, 3600, 1200, at, 0.08, 0.05, 'sine');
+  }
+}
+
+/** The Titans' communicator: a quick two-tone beep. */
+export function playCommunicator(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 1320, 1320, 0, 0.07, 0.1, 'square');
+  sweep(c, 1760, 1760, 0.09, 0.09, 0.1, 'square');
+}
+
+/** Robin's bo staff whirling up to block: a run of swishes, then the clack of the blow on it. */
+export function playStaffBlock(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 3; i += 1) swish(c, 700, 2600, i * 0.09, 0.08, 1.4, 0.12);
+  hit(c, 2600, 1.8, 0.3, 0.03, 0.3);
+  sweep(c, 1900, 1850, 0.3, 0.14, 0.1, 'sine');
+}
+
+/* ------------------------------ Джокер ------------------------------ */
+
+/** A big card turning over: a quick papery flick. */
+export function playCardFlip(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 1800, 5200, 0, 0.12, 2, 0.14);
+  hit(c, 3800, 2, 0.12, 0.025, 0.12);
+}
+
+/**
+ * A cackle: "ha-ha-ha-HA", each "ha" a burst of a buzzy, nasal tone through a vowel-ish filter,
+ * hopping up and down in pitch and getting faster — synthesised, but unmistakably a laugh.
+ */
+export function playCackle(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const t0 = c.currentTime;
+  const pitches = [310, 360, 300, 380, 330, 420];
+  let at = 0;
+  pitches.forEach((f, i) => {
+    const len = 0.11 - i * 0.008;
+    const osc = c.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(f * 1.15, t0 + at);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.8, t0 + at + len);
+    const vowel = c.createBiquadFilter();
+    vowel.type = 'bandpass';
+    vowel.frequency.value = 900;
+    vowel.Q.value = 3;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0 + at);
+    g.gain.exponentialRampToValueAtTime(0.22, t0 + at + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
+    osc.connect(vowel).connect(g).connect(output(c));
+    osc.start(t0 + at);
+    osc.stop(t0 + at + len + 0.02);
+    // The breath of the "h".
+    hit(c, 2500, 1, at, 0.03, 0.06);
+    at += len + 0.05 - i * 0.004;
+  });
+}
+
+/** The trick flower squirting: a short wet spurt, then the hiss of the acid eating something. */
+export function playSquirt(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 700, 2200, 0, 0.18, 2.5, 0.2);
+  hit(c, 6000, 1.5, 0.3, 0.45, 0.07);
+}
+
+/** A jack-in-the-box: the spring's "boing". */
+export function playBoing(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const t0 = c.currentTime;
+  const osc = c.createOscillator();
+  const lfo = c.createOscillator();
+  const depth = c.createGain();
+  const g = c.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(140, t0);
+  osc.frequency.exponentialRampToValueAtTime(420, t0 + 0.1);
+  osc.frequency.exponentialRampToValueAtTime(220, t0 + 0.6);
+  lfo.frequency.value = 14;
+  depth.gain.value = 50;
+  lfo.connect(depth).connect(osc.frequency);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.65);
+  osc.connect(g).connect(output(c));
+  for (const o of [osc, lfo]) {
+    o.start(t0);
+    o.stop(t0 + 0.7);
+  }
+}
+
+/** The toy gun's "BANG!": a cork-gun pop, more fun than fright. */
+export function playBang(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  hit(c, 1600, 0.7, 0, 0.06, 0.45);
+  sweep(c, 900, 200, 0, 0.08, 0.3, 'square');
+  sweep(c, 120, 50, 0, 0.18, 0.4, 'sine');
+}
+
+/* ------------------------------ Фредди ------------------------------ */
+
+/** One music-box note: a bright plucked tine, a quick bell with a little ring. */
+function tine(c: AudioContext, freq: number, at: number, peak: number) {
+  sweep(c, freq, freq, at, 0.5, peak, 'triangle');
+  sweep(c, freq * 2, freq * 2, at, 0.25, peak * 0.35, 'sine');
+  sweep(c, freq * 3.01, freq * 3.01, at, 0.12, peak * 0.15, 'sine');
+}
+
+/**
+ * Freddy's music box: the Toreador march he plays in the dark, as a tinkling, slightly slow
+ * tune. Starts it looping quietly and returns a function that stops it.
+ */
+const TOREADOR: [number, number][] = [
+  [392, 0.36], [440, 0.12], [392, 0.24], [329.6, 0.36], [329.6, 0.36], [329.6, 0.24],
+  [293.7, 0.12], [329.6, 0.24], [349.2, 0.24], [329.6, 0.6],
+];
+export function startMusicBox(prefs: FeedbackPrefs): () => void {
+  if (!prefs.sound) return () => {};
+  const c = audioContext();
+  if (!c) return () => {};
+  const total = TOREADOR.reduce((sum, [, d]) => sum + d, 0) + 0.8;
+  const play = () => {
+    let t = 0;
+    for (const [f, d] of TOREADOR) {
+      tine(c, f * 2, t, 0.07);
+      t += d;
+    }
+  };
+  play();
+  const id = window.setInterval(play, total * 1000);
+  return () => window.clearInterval(id);
+}
+
+/** The jump-scare scream: a harsh, distorted, wavering shriek, loud and short. */
+export function playScreech(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const t0 = c.currentTime;
+  const dur = 0.9;
+  const shaper = c.createWaveShaper();
+  const curve = new Float32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    const x = (i / 255) * 2 - 1;
+    curve[i] = Math.tanh(x * 6);
+  }
+  shaper.curve = curve;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.02);
+  g.gain.setValueAtTime(0.32, t0 + dur * 0.6);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  shaper.connect(g).connect(output(c));
+  for (const [f, d] of [[620, 0], [930, 7], [1240, -9]] as const) {
+    const osc = c.createOscillator();
+    osc.type = 'sawtooth';
+    osc.detune.value = d;
+    osc.frequency.setValueAtTime(f * 0.7, t0);
+    osc.frequency.exponentialRampToValueAtTime(f * 1.15, t0 + 0.08);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.85, t0 + dur);
+    const wob = c.createOscillator();
+    const wd = c.createGain();
+    wob.frequency.value = 23;
+    wd.gain.value = f * 0.06;
+    wob.connect(wd).connect(osc.frequency);
+    osc.connect(shaper);
+    for (const o of [osc, wob]) {
+      o.start(t0);
+      o.stop(t0 + dur + 0.02);
+    }
+  }
+  hit(c, 3000, 0.5, 0, dur * 0.8, 0.18);
+}
+
+/** A burst of camera static: the feed coming on. */
+export function playStatic(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  hit(c, 4000, 0.4, 0, 0.35, 0.12);
+  hit(c, 1200, 0.6, 0.05, 0.25, 0.08);
+}
+
+/** Six o'clock: the shift is over — the clock's chime, three slow bell strikes. */
+export function playSixAm(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 3; i += 1) {
+    bell(c, 784, i * 0.45, 1.1, 0.16);
+    bell(c, 1175, i * 0.45 + 0.01, 0.8, 0.06);
+  }
+}
+
+/** Kids cheering "yaaay": a swell of bright, wavering voices — noise and tones rising together. */
+export function playYay(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 6; i += 1) {
+    const f = 520 + i * 90 + Math.random() * 40;
+    const at = Math.random() * 0.08;
+    sweep(c, f, f * 1.35, at, 0.7, 0.04, 'sawtooth');
+  }
+  swish(c, 1500, 2600, 0, 0.8, 0.9, 0.14);
+}
+
+/** Mum's slipper: a whistle through the air, then a flat, rubbery smack. */
+export function playSlipper(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 900, 3800, 0, 0.3, 1.6, 0.18);
+  const at = 0.32;
+  hit(c, 1500, 0.6, at, 0.08, 0.5);
+  hit(c, 3800, 1.2, at, 0.04, 0.25);
+  sweep(c, 210, 80, at, 0.12, 0.45, 'sine');
+}
+
+/** A karate block: a sharp clap of a palm meeting the blow, with a dull thud behind it. */
+export function playKarateBlock(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  hit(c, 2800, 0.9, 0.02, 0.04, 0.42);
+  hit(c, 6200, 2, 0.02, 0.02, 0.2);
+  sweep(c, 160, 60, 0.02, 0.14, 0.4, 'sine');
+  swish(c, 3000, 800, 0, 0.08, 1.5, 0.12);
+}
+
+/** Seeing stars: a springy "boing", then little twinkles going round. */
+export function playDizzy(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const t0 = c.currentTime;
+  const osc = c.createOscillator();
+  const g = c.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(180, t0);
+  osc.frequency.exponentialRampToValueAtTime(520, t0 + 0.08);
+  osc.frequency.exponentialRampToValueAtTime(160, t0 + 0.45);
+  const lfo = c.createOscillator();
+  const depth = c.createGain();
+  lfo.frequency.value = 18;
+  depth.gain.value = 40;
+  lfo.connect(depth).connect(osc.frequency);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+  osc.connect(g).connect(output(c));
+  for (const o of [osc, lfo]) {
+    o.start(t0);
+    o.stop(t0 + 0.55);
+  }
+  for (let i = 0; i < 6; i += 1) {
+    const f = [2093, 2637, 3136][i % 3];
+    sweep(c, f, f, 0.45 + i * 0.12, 0.12, 0.07, 'sine');
+  }
+}
+
+/** A penguin belly-sliding away over the ice: a long hiss that bends down as he goes. */
+export function playSlide(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 5200, 1800, 0, 0.6, 3, 0.16);
+  swish(c, 2600, 900, 0.05, 0.55, 1.2, 0.08);
+}
+
+/** A blow glancing off an ice shield: a bright, short, glassy clank. */
+export function playShieldClank(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const k = 0.92 + Math.random() * 0.16;
+  hit(c, 4400 * k, 3, 0.03, 0.02, 0.16);
+  sweep(c, 2300 * k, 2250 * k, 0.03, 0.16, 0.11, 'sine');
+  sweep(c, 3480 * k, 3420 * k, 0.03, 0.1, 0.06, 'sine');
+}
+
+/** A frozen rep: the ice holding Gru takes a crack — a sharp, glassy split and a creak under it. */
+export function playIceCrack(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const k = 0.9 + Math.random() * 0.2;
+  hit(c, 5200 * k, 2, 0.08, 0.03, 0.22);
+  hit(c, 2400 * k, 6, 0.09, 0.05, 0.14);
+  sweep(c, 3400 * k, 2900 * k, 0.08, 0.09, 0.09, 'sine');
+  sweep(c, 180 * k, 120 * k, 0.08, 0.12, 0.12, 'triangle');
+}
+
+/** The ice giving way: a burst of breaking glass — a crash, then shards tinkling down. */
+export function playIceShatter(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  hit(c, 3800, 0.8, 0.08, 0.12, 0.3);
+  hit(c, 7000, 1.5, 0.08, 0.2, 0.18);
+  for (let i = 0; i < 9; i += 1) {
+    const f = 2600 + Math.random() * 3600;
+    const at = 0.14 + i * 0.035 + Math.random() * 0.02;
+    sweep(c, f, f * 0.995, at, 0.09, 0.07, 'sine');
+  }
+}
+
+/** A minion's giggle: a run of quick, high, bouncing blips. */
+export function playGiggle(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const base = 780 + Math.random() * 120;
+  for (let i = 0; i < 5; i += 1) {
+    const f = base * (i % 2 ? 1.25 : 1) * (1 - i * 0.04);
+    sweep(c, f, f * 1.15, 0.05 + i * 0.075, 0.06, 0.09, 'triangle');
+  }
+}
+
+/** Gru's ray giving up when you move in time: a sad little deflating "pfff". */
+export function playFizzle(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 2400, 500, 0, 0.3, 1.5, 0.12);
+  sweep(c, 600, 220, 0, 0.25, 0.08, 'triangle');
 }
 
 /** Announces that the minions are done and the boss is in front of you. */

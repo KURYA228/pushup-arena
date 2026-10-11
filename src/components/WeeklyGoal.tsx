@@ -262,7 +262,7 @@ function GoalEditor({
       <button
         type="submit"
         disabled={!valid || !changed}
-        className="w-full rounded-xl bg-arena-amber py-2.5 text-sm font-semibold text-arena-bg active:scale-[0.98] disabled:opacity-40"
+        className="btn-3d w-full"
       >
         Сохранить
       </button>

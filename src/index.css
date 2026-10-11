@@ -56,6 +56,48 @@ body {
 }
 
 /*
+ * The big game button, as on the title screen: a yellow face on a darker edge, in the display
+ * face, pressed down onto its edge when tapped. In the components layer so utilities (a bigger
+ * height, a margin) still win over it. Leave room under it for the 6px edge.
+ */
+@layer components {
+  .btn-3d {
+    --btn-face: #f2b705;
+    --btn-edge: #b9770e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 3.25rem;
+    padding-inline: 1rem;
+    border-radius: 1rem;
+    background: var(--btn-face);
+    color: #141a2b;
+    font-family: 'Russo One', var(--font-sans);
+    font-size: 1.125rem;
+    line-height: 1.1;
+    box-shadow: 0 6px 0 var(--btn-edge), 0 10px 24px rgba(0, 0, 0, 0.45);
+    transition:
+      transform 75ms ease-out,
+      box-shadow 75ms ease-out,
+      opacity 150ms;
+  }
+  .btn-3d:active:not(:disabled) {
+    transform: translateY(5px);
+    box-shadow: 0 1px 0 var(--btn-edge), 0 4px 12px rgba(0, 0, 0, 0.45);
+  }
+  .btn-3d:disabled {
+    opacity: 0.45;
+  }
+  /* White face, for the Google button. */
+  .btn-3d-light {
+    --btn-face: #ffffff;
+    --btn-edge: #b8bcc6;
+    color: #1f1f1f;
+  }
+}
+
+/*
  * The page column. Phone-first — a single narrow column is right on the device the app is
  * actually used on — but on a laptop that column stranded most of the window, so it widens in
  * two steps. Views that gain from the extra room rearrange themselves at the same breakpoints;

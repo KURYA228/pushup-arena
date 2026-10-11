@@ -13,6 +13,8 @@ export function BossIcon({
   ratio,
   maxShape,
   hug,
+  shadowed,
+  frame,
 }: {
   boss: BossDef;
   index: number;
@@ -23,6 +25,8 @@ export function BossIcon({
   ratio?: number;
   maxShape?: number;
   hug?: boolean;
+  shadowed?: boolean;
+  frame?: { w: number; h: number };
 }) {
   return (
     <EnemyIcon
@@ -36,6 +40,9 @@ export function BossIcon({
       ratio={ratio}
       maxShape={maxShape}
       hug={hug}
+      shadowed={shadowed}
+      frame={frame}
+      light={boss.artLight}
     />
   );
 }

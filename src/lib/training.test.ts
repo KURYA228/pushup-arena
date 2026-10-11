@@ -10,12 +10,12 @@ test('подход растёт, пока паузы короче порога, 
   for (let i = 1; i < 12; i += 1) t = advanceTraining(t, MON + i * 2000);
   assert.equal(t.setRun.count, 12);
   assert.equal(t.bestSet, 12);
-  // Пауза от 3 секунд — новый подход, лучший остаётся.
+  // Пауза от 5 секунд — новый подход, лучший остаётся.
   t = advanceTraining(t, MON + 11 * 2000 + STRENGTH_PAUSE_MS);
   assert.equal(t.setRun.count, 1);
   assert.equal(t.bestSet, 12);
-  // А 2,9 секунды — ещё тот же подход.
-  t = advanceTraining(t, MON + 11 * 2000 + STRENGTH_PAUSE_MS + 2900);
+  // А 4,9 секунды — ещё тот же подход.
+  t = advanceTraining(t, MON + 11 * 2000 + STRENGTH_PAUSE_MS + 4900);
   assert.equal(t.setRun.count, 2);
 });
 

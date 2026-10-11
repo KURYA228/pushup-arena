@@ -50,7 +50,7 @@ test('Слепая зона считает повторы по противни�
 
 test('Регенерация идёт по часам, а не ждёт следующего повтора', () => {
   // Достаточно урона, чтобы трём тикам лечения было куда ложиться и они не упёрлись в потолок.
-  const worked = reps(at('bloodking', BOSS_STEP), 60);
+  const worked = reps(at('threshold', BOSS_STEP), 60);
 
   // Отсчёт идёт от последнего повтора, а не от конца прогона — привязываемся к нему явно.
   const since = worked.state.fight.regenAt;
@@ -67,20 +67,20 @@ test('Регенерация идёт по часам, а не ждёт след
 });
 
 test('Регенерация не начисляется дважды за один и тот же интервал', () => {
-  const worked = reps(at('bloodking', BOSS_STEP), 10);
+  const worked = reps(at('threshold', BOSS_STEP), 10);
   const first = applyIdleRegen(worked.state, worked.endedAt + 2 * SET_BREAK_MS);
   const again = applyIdleRegen(first.state, worked.endedAt + 2 * SET_BREAK_MS);
   assert.equal(again.healed, 0, 'повторный вызов в тот же момент ничего не добавляет');
 });
 
 test('Регенерация: короткий отдых боссу не помогает', () => {
-  const worked = reps(at('bloodking', BOSS_STEP), 10);
+  const worked = reps(at('threshold', BOSS_STEP), 10);
   const quick = resolveArenaRep(worked.state, worked.endedAt + 500, 1);
   assert.equal(quick.healed, 0);
 });
 
 test('Регенерация не поднимает HP выше полного даже за сутки простоя', () => {
-  const start = at('bloodking', BOSS_STEP);
+  const start = at('threshold', BOSS_STEP);
   const one = resolveArenaRep(start, 1_000_000, 1);
   const after = applyIdleRegen(one.next, 1_000_000 + 24 * 60 * 60 * 1000);
   assert.equal(after.state.enemyHp, start.enemyHp);
@@ -88,7 +88,7 @@ test('Регенерация не поднимает HP выше полного 
 
 test('Регенерация никогда не уменьшает HP, даже при испорченном состоянии боя', () => {
   // Ровно то, что оставляла дев-панель: HP от одного противника, максимум — от другого.
-  const boss = at('bloodking', BOSS_STEP);
+  const boss = at('threshold', BOSS_STEP);
   const corrupted: ArenaState = {
     ...boss,
     fight: { ...boss.fight, enemyMaxHp: 7, regenAt: 1_000_000 },
@@ -242,10 +242,10 @@ test('Тактическое отступление: на половине HP Ш
   assert.ok(rest.outcomes.every((o) => !o.events.includes('retreat')));
 });
 
-test('Строгая мама: после паузы от 3 секунд повтор не бьёт — даже после отдыха', () => {
+test('Строгая мама: после паузы от 5 секунд повтор не бьёт — даже после отдыха', () => {
   const quick = reps(at('wraith', BOSS_STEP), 3, 2900);
   assert.deepEqual(quick.outcomes.map((o) => o.blocked), [null, null, null]);
-  const slow = reps(at('wraith', BOSS_STEP), 3, 3000);
+  const slow = reps(at('wraith', BOSS_STEP), 3, 5000);
   assert.deepEqual(slow.outcomes.map((o) => o.blocked), [null, 'slacking', 'slacking']);
   // Долгий отдых не спасает: первый повтор после него пропадает, дальше в темпе — бьёт.
   const warm = reps(at('wraith', BOSS_STEP), 2);
@@ -353,4 +353,61 @@ test('Повторная победа над боссом ведёт на сле
   assert.equal(run.hit.next.stageStep, 0);
   assert.equal(run.hit.next.enemyHp, encounterAt(BOSSES[indexOf('grunt') + 1], 0).hp);
   assert.deepEqual(run.hit.next.bossesDefeated, ['grunt', 'brawler']);
+});
+
+test('Дань: каждый седьмой повтор подхода уходит в казну', () => {
+  const { outcomes } = reps(at('bloodking', BOSS_STEP), 14);
+  const blocked = outcomes.map((o, i) => (o.blocked === 'tribute' ? i + 1 : null)).filter(Boolean);
+  assert.deepEqual(blocked, [7, 14]);
+  assert.equal(outcomes[6].damage, 0);
+});
+
+test('Дань считается по подходу: пауза начинает счёт заново', () => {
+  const first = reps(at('bloodking', BOSS_STEP), 5);
+  const second = reps(first.state, 7, 1000, first.endedAt + SET_BREAK_MS);
+  assert.deepEqual(
+    second.outcomes.map((o) => o.blocked),
+    [null, null, null, null, null, null, 'tribute'],
+  );
+});
+
+test('Казна: на половине HP богатыри один раз прикрывают царя на 10 повторов', () => {
+  const start = at('bloodking', BOSS_STEP);
+  const nearHalf: ArenaState = { ...start, enemyHp: Math.ceil(start.fight.enemyMaxHp * 0.5) + 1 };
+  const trigger = resolveArenaRep(nearHalf, 1_000_000, 1);
+  assert.deepEqual(trigger.events, ['treasury']);
+  assert.equal(trigger.next.fight.guardLeft, 10);
+
+  const full = resolveArenaRep(start, 1_000_000, 1).damage;
+  const guarded = resolveArenaRep(trigger.next, 1_001_000, 1);
+  assert.equal(guarded.damage, Math.max(1, Math.round(full * 0.5)));
+  assert.equal(guarded.next.fight.guardLeft, 9);
+
+  const later = reps(guarded.next, 12, 1000, 1_002_000);
+  assert.ok(!later.outcomes.some((o) => o.events.includes('treasury')), 'казна открывается один раз');
+  assert.equal(later.state.fight.guardLeft, 0);
+});
+
+test('Плата за вход: третий повтор подхода закрывает плату', () => {
+  const { outcomes } = reps(at('grunt', BOSS_STEP), 5);
+  assert.deepEqual(outcomes.map((o) => o.blocked), ['fee', 'fee', 'fee', null, null]);
+  assert.deepEqual(outcomes.map((o) => o.events.includes('fee-paid')), [false, false, true, false, false]);
+});
+
+test('Панцирь: удар, который опускает HP до 60%, пробивает его', () => {
+  const start = at('steelguard', BOSS_STEP);
+  const run = repsUntil(start, (o) => o.events.includes('bulwark-broken'));
+  const max = run.state.fight.enemyMaxHp;
+  assert.ok(run.state.enemyHp <= max * 0.6);
+  // До этого удара — ни разу.
+  assert.equal(run.outcomes.filter((o) => o.events.includes('bulwark-broken')).length, 1);
+});
+
+test('Стальная воля: выпавший крит не проходит, и об этом сообщается', () => {
+  const s = at('wraith', BOSS_STEP);
+  const o = resolveArenaRep(s, 1_000_000, 0);
+  assert.equal(o.isCrit, false);
+  assert.ok(o.events.includes('crit-blocked'));
+  const plain = resolveArenaRep(s, 1_000_000, 1);
+  assert.ok(!plain.events.includes('crit-blocked'));
 });

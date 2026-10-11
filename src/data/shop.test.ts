@@ -58,7 +58,7 @@ test('Тяжёлая рука makes crits hit harder', () => {
 });
 
 test('Второе дыхание delays regeneration', () => {
-  const s = at('bloodking', BOSS_STEP);
+  const s = at('threshold', BOSS_STEP);
   const hit = resolveArenaRep(s, 1_000_000, 1).next;
   const rest = 1_000_000 + SET_BREAK_MS + 500;
   assert.ok(applyIdleRegen(hit, rest).healed > 0, 'without the perk he heals');

@@ -33,15 +33,17 @@ export type AbilityKind =
   | 'scream'
   | 'jokerCard'
   | 'teamwork'
-  | 'endCrystals';
+  | 'endCrystals'
+  | 'tribute'
+  | 'treasury';
 
 /**
- * The one pause the whole game measures by: three seconds or more ends a set. Every rule that
+ * The one pause the whole game measures by: five seconds or more ends a set. Every rule that
  * cares about a pause uses it — the end of a set, the strength rank's "in a row", the abilities
  * below — so there's a single number to learn. It's also the tick of "Регенерация": every
  * interval of idling hands the boss another slice of HP back.
  */
-export const SET_BREAK_MS = 3000;
+export const SET_BREAK_MS = 5000;
 /** "Без остановки": the same pause as everything else — stop, and the set is gone. */
 export const NO_STOP_MS = SET_BREAK_MS;
 /** "Замораживающий луч": the same pause as everything else. */
@@ -53,7 +55,9 @@ export const END_CRYSTALS = 3;
 export const CRYSTAL_REPS = 15;
 /** "Кристаллы Края": damage taken while any crystal still stands. */
 export const CRYSTAL_SHIELD = 0.5;
-/** "Копилка": every this-many reps goes into the piggy bank instead of into the pig. */
+/** "Казна": how much of a blow gets through while the bogatyrs are covering the tsar. */
+export const TREASURY_GUARD = 0.5;
+/** "Краденое яйцо": every this-many reps the pig steals an egg instead of taking the blow. */
 export const PIGGY_EVERY = 3;
 
 export interface BossAbility {
@@ -123,8 +127,8 @@ export const ABILITY_INFO: Record<
     describe: (v) => `первые ${v} повтора каждого подхода уходят ему в кассу — без урона`,
   },
   piggyBank: {
-    name: 'Копилка',
-    describe: (v) => `каждый ${PIGGY_EVERY}-й повтор он не получает урон, а лечится на ${Math.round(v * 100)}% HP`,
+    name: 'Краденое яйцо',
+    describe: (v) => `каждый ${PIGGY_EVERY}-й повтор он крадёт яйцо — урона нет, а сам лечится на ${Math.round(v * 100)}% HP`,
   },
   freezeRay: {
     name: 'Замораживающий луч',
@@ -155,6 +159,15 @@ export const ABILITY_INFO: Record<
     describe: () =>
       `пока цел хоть один из ${END_CRYSTALS} кристаллов, урон вдвое меньше; ${CRYSTAL_REPS} повторов без паузы разбивают кристалл`,
   },
+  tribute: {
+    name: 'Дань',
+    describe: (v) => `каждый ${v}-й повтор подхода Антипка уносит в казну — без урона`,
+  },
+  treasury: {
+    name: 'Казна',
+    describe: (v) =>
+      `на половине HP открывает казну и нанимает богатырей: следующие ${v} повторов бьют вполсилы`,
+  },
 };
 
 export const describeAbility = (a: BossAbility) => ABILITY_INFO[a.kind].describe(a.value);
@@ -169,23 +182,25 @@ export const ABILITY_TIPS: Record<AbilityKind, { icon: string; tip: string }> = 
   enrage: { icon: '😡', tip: 'Под конец он крепче — оставь силы на последние 40%.' },
   bulwark: { icon: '🐢', tip: 'Начало тяжёлое, дальше легче — не сдавайся в первых подходах.' },
   xpDrain: { icon: '📉', tip: 'Урон не меняется, просто меньше XP — бей как обычно.' },
-  regen: { icon: '💚', tip: 'Не отдыхай — каждые 3 секунды паузы он лечится.' },
+  regen: { icon: '💚', tip: `Не отдыхай — каждые ${SET_BREAK_MS / 1000} секунд паузы он лечится.` },
   skipEvery: { icon: '👻', tip: 'Каждый N-й повтор мимо — закладывай лишние повторы.' },
-  noStop: { icon: '⏱️', tip: 'Не отдыхай дольше 3 секунд — иначе весь подход сотрётся.' },
+  noStop: { icon: '⏱️', tip: `Не отдыхай дольше ${NO_STOP_MS / 1000} секунд — иначе весь подход сотрётся.` },
   evenOnly: { icon: '⚖️', tip: 'Бьёт только каждый второй — нужно вдвое больше повторов.' },
   infection: { icon: '🦠', tip: 'Добивай подчинённых быстро, иначе следующий станет толще.' },
   bloodDebt: { icon: '🩸', tip: 'Длинные подходы — пауза возвращает ему часть урона.' },
   falseDeath: { icon: '💀', tip: 'На последнем HP не останавливайся — добивай без паузы.' },
   mirror: { icon: '🪞', tip: 'Второй подчинённый встанет ещё раз — будь готов.' },
   entryFee: { icon: '🪙', tip: 'Делай длинные подходы: касса берёт только первые повторы каждого.' },
-  piggyBank: { icon: '🐷', tip: 'Каждый третий повтор — в копилку. Бей много и быстро.' },
-  freezeRay: { icon: '❄️', tip: 'Не останавливайся дольше 3 секунд — иначе заморозит.' },
+  piggyBank: { icon: '🥚', tip: 'Каждый третий повтор он крадёт яйцо и лечится. Бей много и быстро.' },
+  freezeRay: { icon: '❄️', tip: `Не останавливайся дольше ${FREEZE_PAUSE_MS / 1000} секунд — иначе заморозит.` },
   retreat: { icon: '🏃', tip: 'На половине он подлечится один раз — это нормально, дожимай.' },
-  strictMom: { icon: '😤', tip: 'Держи темп быстрее 3 секунд — после любой паузы первый повтор пропадёт.' },
+  strictMom: { icon: '😤', tip: `Держи темп быстрее ${SET_BREAK_MS / 1000} секунд — после любой паузы первый повтор пропадёт.` },
   scream: { icon: '😱', tip: 'Когда испугает — сделай 10 подряд без паузы, иначе урон сгорит.' },
   jokerCard: { icon: '🃏', tip: 'Криты его лечат — улучшения на крит здесь вредят.' },
   teamwork: { icon: '🤝', tip: 'Подходы минимум по 5 — короче не засчитаются.' },
   endCrystals: { icon: '💎', tip: 'Подходы по 15 без паузы ломают кристаллы — потом урон полный.' },
+  tribute: { icon: '👑', tip: 'Каждый седьмой повтор подхода уходит в казну — закладывай лишние.' },
+  treasury: { icon: '💰', tip: 'После половины HP богатыри прикроют его на 10 повторов — просто дожимай.' },
 };
 export const abilityName = (a: BossAbility) => ABILITY_INFO[a.kind].name;
 

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { TierIcon } from './TierIcon';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { RankUp } from '../data/ranks';
 import { Burst } from './Burst';
@@ -85,7 +86,7 @@ export function RankUpOverlay({
             animate={calm ? { opacity: 1 } : { scale: [0, 1.25, 0.95, 1], rotate: [-30, 8, -4, 0] }}
             transition={{ duration: 0.8, times: [0, 0.55, 0.8, 1] }}
           >
-            <span>{current.icon}</span>
+            <TierIcon icon={current.icon} />
             <Burst count={26} spread={150} confetti />
           </motion.div>
 

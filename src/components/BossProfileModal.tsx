@@ -129,7 +129,7 @@ export function BossProfileModal({
           <>
             <button
               onClick={onReplay}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98]"
+              className="btn-3d mt-3 w-full"
             >
               <RotateCcw size={16} /> Пройти снова
             </button>

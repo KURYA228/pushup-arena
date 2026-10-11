@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { TierIcon } from './TierIcon';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BookOpen, ChevronRight, CircleHelp, Flame, MessageSquare, MousePointerClick, ShoppingBag, Snowflake, Trophy } from 'lucide-react';
 import type { ProfileRecord } from '../types';
@@ -75,7 +76,7 @@ export function HomeView({
           Push Up Legends
         </button>
         <h1 className="mt-1 text-2xl font-bold" style={{ color: derived.rank.color }}>
-          <span className="mr-1.5">{derived.rank.icon}</span>
+          <TierIcon icon={derived.rank.icon} className="mr-1.5" />
           {derived.rank.name}
         </h1>
         {upcoming && (
@@ -106,7 +107,7 @@ export function HomeView({
                 setHelpOpen(true);
                 dismissHowto();
               }}
-              className="mt-2.5 w-full rounded-xl bg-arena-amber py-2 text-sm font-semibold text-arena-bg active:scale-[0.98]"
+              className="btn-3d mt-2.5 w-full text-base"
             >
               Как играть — за минуту
             </button>

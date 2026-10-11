@@ -57,7 +57,7 @@ export function SyncGate({ cloud }: { cloud: Cloud }) {
           <button
             disabled={busy}
             onClick={run(cloud.takeCloud)}
-            className="arena-glow rounded-xl bg-arena-amber py-3 text-sm font-bold text-black active:scale-[0.98] disabled:opacity-50"
+            className="btn-3d"
           >
             Взять из аккаунта
           </button>
