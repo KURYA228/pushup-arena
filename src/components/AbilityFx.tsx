@@ -34,6 +34,8 @@ export const STAMPS: Record<AbilityEvent, StampStyle> = {
   'fee-paid': { text: 'ОПЛАЧЕНО ✓', color: '#4ade80', motion: 'slam' },
   'bulwark-broken': { text: 'ПАНЦИРЬ ПРОБИТ!', color: '#7dd3fc', motion: 'shatter' },
   'crit-blocked': { text: 'КРИТ ЗАБЛОКИРОВАН!', color: '#3fa9e0', motion: 'slam' },
+  soup: { text: 'СУП ГОТОВ!', color: '#4ade80', motion: 'slam' },
+  'soup-cooled': { text: 'КОТЁЛ ОСТЫЛ', color: '#7dd3fc', motion: 'float' },
 };
 
 /** The big word over the boss. Remount (change `id`) to play it again. */
@@ -45,7 +47,10 @@ export function AbilityStamp({ stamp }: { stamp: { id: number; event: AbilityEve
         {stamp && (
           <motion.div
             key={stamp.id}
-            className="relative flex items-center justify-center"
+            // Stacked on the middle, not laid out in a row: a new stamp arrives while the last
+            // one is still on its way out, and as flex items the two sat side by side — the new
+            // one off to the right until the old one had gone, then jumping into the centre.
+            className="absolute inset-0 flex items-center justify-center"
             initial={calm ? { opacity: 0 } : enterFrom(STAMPS[stamp.event].motion)}
             animate={calm ? { opacity: 1 } : settle(STAMPS[stamp.event].motion)}
             exit={{ opacity: 0, scale: 1.15, transition: { duration: 0.25 } }}

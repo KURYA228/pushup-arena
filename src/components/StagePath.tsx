@@ -27,8 +27,11 @@ export function StagePath({
   return (
     <div className="flex items-start">
       {nodes.map((node, i) => {
-        const done = i < step;
-        const current = i === step;
+        // The boss is the last node however many minions stand before him — none, on a stage
+        // that is him alone — while `step` counts him as 3 either way.
+        const at = Math.min(step, nodes.length - 1);
+        const done = i < at;
+        const current = i === at;
         return (
           <div key={node.key} className="flex flex-1 flex-col items-center">
             {/* Fixed row height for every node, boss included. Without it the row is only as tall

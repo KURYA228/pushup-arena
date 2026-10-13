@@ -15,6 +15,7 @@ export function BossIcon({
   hug,
   shadowed,
   frame,
+  original = true,
 }: {
   boss: BossDef;
   index: number;
@@ -27,6 +28,11 @@ export function BossIcon({
   hug?: boolean;
   shadowed?: boolean;
   frame?: { w: number; h: number };
+  /**
+   * The artwork as drawn. On by default: the lifted version is for the fight screen alone, where
+   * the phone is on the floor at arm's length — everywhere else he looks the way he was drawn.
+   */
+  original?: boolean;
 }) {
   return (
     <EnemyIcon
@@ -43,6 +49,7 @@ export function BossIcon({
       shadowed={shadowed}
       frame={frame}
       light={boss.artLight}
+      original={original}
     />
   );
 }

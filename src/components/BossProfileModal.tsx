@@ -115,7 +115,7 @@ export function BossProfileModal({
         <div className="mt-3 rounded-xl border border-arena-border bg-arena-surface-2 px-3 py-2 text-left">
           <p className="text-[10px] uppercase text-arena-text-dim">до него придётся пройти</p>
           <p className="mt-0.5 text-xs text-arena-text">
-            {boss.minions.map((m) => m.name).join(' · ')}
+            {boss.minions.length ? boss.minions.map((m) => m.name).join(' · ') : 'никого — он выходит сам'}
           </p>
         </div>
 

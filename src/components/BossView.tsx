@@ -5,7 +5,7 @@ import type { useProfile } from '../hooks/useProfile';
 import type { Feedback } from '../hooks/useFeedback';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { BOSSES, stageProgressLabel, type BossDef } from '../data/bosses';
-import { CRYSTAL_REPS, FREEZE_PAUSE_MS, HALF_HP, SET_BREAK_MS, abilityName, abilityValue, describeAbility, hasAbility } from '../data/abilities';
+import { CRYSTAL_REPS, FREEZE_PAUSE_MS, HALF_HP, SET_BREAK_MS, SOUP_BOILS_AFTER, abilityName, abilityValue, describeAbility, hasAbility } from '../data/abilities';
 import { perksFrom } from '../data/shop';
 import { FreezeRayWarning, IceBlock, SHOT_FLY_S } from './GruFx';
 import { MomWatch } from './NicoleFx';
@@ -13,6 +13,7 @@ import { CameraFeed, EnrageEyes, LightsFlicker } from './FreddyFx';
 import { LaughGas } from './JokerFx';
 import { TitansSignal } from './RobinFx';
 import { BogatyrWall } from './Kyiv';
+import { ShredderAmbient, SoupPot } from './ShredderFx';
 import { DragonWeak, EndCrystals, EndHitParticles, EnderAmbient, InfectionBadge } from './EnderFx';
 import { HpMarks, IceShield, RetreatPlaster, hpMarks } from './SkipperFx';
 import { BossIcon } from './BossIcon';
@@ -29,14 +30,16 @@ import { Heartbeat, PulseTrace } from './Heartbeat';
 import { BOSS_HEARTS, MINION_HEARTS } from '../lib/vitals';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { CameraPanel } from './CameraPanel';
-import { Camera, Search, Zap } from 'lucide-react';
+import { Camera, LogOut, RotateCcw, Search, Zap } from 'lucide-react';
 import clsx from 'clsx';
 import { HintCard } from './HintCard';
 import { useHint } from '../lib/hints';
 import { streakNotices } from '../lib/streak';
-import { bossLineLevel, preloadBossCues } from '../lib/feedback';
+import { KATANA_DOUBLE, bossLineLevel, preloadBossCues } from '../lib/feedback';
 import { HitFx, type Hit } from './HitFx';
-import { AbilityScene, SCENE_MS, type Scene, type SceneKind } from './AbilityScene';
+import { AbilityScene, SCENE_MS, STEEL_SHIELD_FADE_MS, type Scene, type SceneKind } from './AbilityScene';
+import { Finale } from './Finale';
+import { hasSeenFinale } from '../lib/finale';
 
 type Derived = NonNullable<ReturnType<typeof useProfile>['derived']>;
 
@@ -116,7 +119,7 @@ export function BossView({
   /** An ability acted out over the screen (AbilityScene). */
   const [scene, setScene] = useState<Scene | null>(null);
   /** `at` overrides where it plays — for a scene that outlives the enemy it was about. */
-  const playScene = (kind: SceneKind, at?: DOMRect) => {
+  const playScene = (kind: SceneKind, at?: DOMRect, variant?: number) => {
     const r = at ?? artRef.current?.getBoundingClientRect();
     const id = ++popId;
     setScene({
@@ -125,6 +128,7 @@ export function BossView({
       x: r ? r.left + r.width / 2 : window.innerWidth / 2,
       y: r ? r.top + r.height / 2 : window.innerHeight / 3,
       art: `${import.meta.env.BASE_URL}bosses/${derived.boss.icon}`,
+      variant,
     });
     window.setTimeout(() => setScene((cur) => (cur?.id === id ? null : cur)), SCENE_MS[kind]);
   };
@@ -145,6 +149,28 @@ export function BossView({
    * on its own if you land on a boss some other way (below).
    */
   const [briefing, setBriefing] = useState(false);
+  /**
+   * The closing scene: «ЭТО КОНЕЦ?», and Kiryukha breaking it. It stands between the arena's
+   * bosses and the last stage, which is him — so it plays once, when that stage opens (a beat
+   * after the boss before him falls, so his send-off isn't cut short), and he walks straight out
+   * of it into the fight. The dev panel and the end screen can play it again on its own.
+   */
+  const [finale, setFinale] = useState(false);
+  /** The finale is the way into the last fight, not a rerun: he walks out when it ends. */
+  const finaleIntoFight = useRef(false);
+  const finaleDue =
+    !derived.replaying &&
+    derived.bossIndex === BOSSES.length - 1 &&
+    !profile.bossesDefeated.includes(derived.boss.id) &&
+    !hasSeenFinale();
+  useEffect(() => {
+    if (!finaleDue) return;
+    const t = window.setTimeout(() => {
+      finaleIntoFight.current = true;
+      setFinale(true);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [finaleDue]);
   /** A report waiting for the boss to finish his entrance. */
   const briefAfterEntrance = useRef(false);
   // Arriving some other way — a reload, a jump from the dev panel — there's no entrance to wait
@@ -154,18 +180,21 @@ export function BossView({
   // His entrance cues, fetched while you're still on his minions — and again after the first tap
   // of a session, which is when audio becomes available at all.
   useEffect(() => {
-    preloadBossCues(derived.boss.line);
-    const again = () => preloadBossCues(derived.boss.line);
+    // Shredder's send-off has a recording of its own, wanted the moment he falls.
+    const extra = derived.boss.id === 'stormborn' ? 'cowabunga' : undefined;
+    preloadBossCues(derived.boss.line, extra);
+    const again = () => preloadBossCues(derived.boss.line, extra);
     window.addEventListener('pointerdown', again, { once: true });
     return () => window.removeEventListener('pointerdown', again);
-  }, [derived.boss.line]);
+  }, [derived.boss.line, derived.boss.id]);
   useEffect(() => {
-    if (!bossUp || wasBriefed(derived.boss.id)) return;
+    // Not over the finale: the report waits for him to walk out of it.
+    if (!bossUp || finaleDue || finale || wasBriefed(derived.boss.id)) return;
     const id = window.setTimeout(() => {
       if (!briefAfterEntrance.current) setBriefing(true);
     }, 600);
     return () => window.clearTimeout(id);
-  }, [bossUp, derived.boss.id]);
+  }, [bossUp, finaleDue, finale, derived.boss.id]);
   const closeBriefing = () => {
     markBriefed(derived.boss.id);
     setBriefing(false);
@@ -255,6 +284,29 @@ export function BossView({
 
   const boss = derived.boss;
   const enemy = derived.enemy;
+  /**
+   * The boss's abilities on screen — shields, eyes, guns, pots, counters — only once he has
+   * walked out and said his piece. Over the "BOSS" cut or under his line they'd give the fight
+   * away before it has started, and crowd the one moment that's his.
+   */
+  const abilitiesOn = enemy.isBoss && !bossIntro && !talking;
+
+  // Bebop and Rocksteady walk on firing: a volley the moment either becomes the one you face —
+  // once whatever send-off is holding the stage has finished, not over it. Not on opening the
+  // screen, only on the change (the ref starts on whoever's already there).
+  const enemyKey = `${boss.id}:${derived.stageStep}`;
+  const enemySeen = useRef(enemyKey);
+  useEffect(() => {
+    if (enemySeen.current === enemyKey || interlude != null) return;
+    enemySeen.current = enemyKey;
+    if (boss.id !== 'stormborn' || derived.stageStep > 1) return;
+    const t = window.setTimeout(() => {
+      playScene('laser-volley', undefined, derived.stageStep === 0 ? 1 : -1);
+      feedback.laserVolley();
+    }, 350);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enemyKey, interlude]);
   const regenerating = enemy.isBoss && hasAbility(boss.abilities, 'regen');
   const hpPct = Math.max(0, Math.min(100, (profile.enemyHp / Math.max(1, enemy.hp)) * 100));
   // While a send-off plays the bar stays empty: the next enemy's full bar belongs to his entrance.
@@ -269,7 +321,7 @@ export function BossView({
     !profile.fight.screamUsed &&
     hpFrac > HALF_HP &&
     hpFrac <= 0.6 &&
-    !bossIntro;
+    abilitiesOn;
   useEffect(() => {
     if (!screamNear) return;
     return feedback.musicBox();
@@ -310,6 +362,9 @@ export function BossView({
       // HP an infected minion is carrying, to show it pass on when he falls.
       const carriedBefore = profile.fight.carriedHp ?? 0;
       const result = await registerBossRep();
+      // Shredder's katana: one blade or both, rolled here so the sound and the cut agree.
+      const katana = enemy.isBoss && boss.hitSound === 'katana';
+      const katanaDouble = katana && Math.random() < KATANA_DOUBLE;
       undoStackRef.current.push(result.undo);
       setUndoDepth(undoStackRef.current.length);
       // One cue per rep, picked by significance. Firing them all meant the rep that reached a
@@ -317,10 +372,17 @@ export function BossView({
       // other — three sounds for one event, which just reads as noise.
       // The creeper is the last before the dragon: it goes off first, and he walks out after.
       const creeper = !enemy.isBoss && boss.id === 'nameless' && derived.stageStep === 2;
+      // So is Stockman before Shredder: his mousers pour out along the bar first.
+      const mousers = !enemy.isBoss && boss.id === 'stormborn' && derived.stageStep === 2;
       if (result.bossReached) {
         if (creeper) {
           holdStage(1500);
           window.setTimeout(() => playEntrance(boss.line), 1500);
+        } else if (mousers) {
+          playScene('mousers', hpBarRef.current?.getBoundingClientRect());
+          feedback.mousers();
+          holdStage(1900);
+          window.setTimeout(() => playEntrance(boss.line), 1900);
         } else playEntrance(boss.line);
         // First time against him: the scouting report once he's done talking.
         // Every time he walks out — the first time, again after a loss of the thread, on a replay.
@@ -330,7 +392,7 @@ export function BossView({
       // The named cue belongs to the boss himself, not to the three who come first. `enemy`
       // is read from before the rep landed, which is the one being hit — after it, a killing
       // blow would already have moved on to the next.
-      else feedback.rep(result.isCrit, enemy.isBoss ? boss.hitSound : undefined);
+      else feedback.rep(result.isCrit, enemy.isBoss ? boss.hitSound : undefined, katanaDouble);
 
       // A rep that lands for nothing has to say why, or the counter looks broken.
       const BLOCKED_TEXT = {
@@ -360,6 +422,11 @@ export function BossView({
         frozen: 'ice-chip',
         tribute: 'tribute',
       };
+      // Shredder's blind spot: a Foot ninja takes the blow for him and vanishes in smoke.
+      if (result.blocked === 'blind-spot' && enemy.isBoss) {
+        playScene('foot-ninja');
+        window.setTimeout(feedback.ninjaVanish, 380);
+      }
       const swallowed = result.blocked && BLOCKED_SCENE[result.blocked];
       // The rep Gru's ray fires on has its own scene, once the bolt lands — no chip of ice first.
       if (swallowed && !result.events.includes('frozen')) playScene(swallowed);
@@ -435,7 +502,7 @@ export function BossView({
               },
       );
       if (!result.blocked) {
-        if (box) setHit({ id: ++popId, crit: result.isCrit, box });
+        if (box) setHit({ id: ++popId, crit: result.isCrit, box, katana: katana ? { double: katanaDouble } : undefined });
         setImpact(result.isCrit ? 'crit' : 'hit');
         window.setTimeout(() => setImpact(null), result.isCrit ? 320 : 200);
       }
@@ -574,6 +641,12 @@ export function BossView({
         holdStage(SCENE_MS['minions-carry']);
         feedback.giggle();
       }
+      // Shredder going down: his helmet on the floor and the turtles running through.
+      if ((result.bossDefeated || result.bossRebeaten) && enemy.isBoss && boss.id === 'stormborn' && art) {
+        playScene('cowabunga', art);
+        feedback.cowabunga();
+        holdStage(SCENE_MS.cowabunga);
+      }
       // And he goes the way pigs go: pop.
       if ((result.bossDefeated || result.bossRebeaten) && enemy.isBoss && boss.id === 'brawler' && art) {
         playScene('pig-poof', art);
@@ -642,12 +715,15 @@ export function BossView({
    */
   const playAbilityEvents = (events: AbilityEvent[]) => {
     if (!events.length) return;
-    const ORDER: AbilityEvent[] = ['scream', 'scream-burned', 'scream-survived', 'crystal', 'treasury', 'retreat', 'bulwark-broken', 'frozen', 'covered', 'fee-paid', 'crit-blocked'];
+    const ORDER: AbilityEvent[] = ['scream', 'scream-burned', 'scream-survived', 'crystal', 'treasury', 'soup', 'retreat', 'bulwark-broken', 'frozen', 'covered', 'fee-paid', 'soup-cooled', 'crit-blocked'];
     const top = ORDER.find((e) => events.includes(e)) ?? events[0];
     const id = ++popId;
     const stampAt = top === 'frozen' ? SHOT_FLY_S * 1000 : 0;
     window.setTimeout(() => setStamp({ id, event: top }), stampAt);
-    window.setTimeout(() => setStamp((cur) => (cur?.id === id ? null : cur)), stampAt + 1300);
+    // A blocked crit's word goes with its shield: it starts out as the shield starts to sink, so
+    // the two are gone together. Everything else holds a moment longer.
+    const holdMs = top === 'crit-blocked' ? STEEL_SHIELD_FADE_MS : 1300;
+    window.setTimeout(() => setStamp((cur) => (cur?.id === id ? null : cur)), stampAt + holdMs);
 
     // The scene for it, in the same order of importance as the word.
     const SCENES: Partial<Record<AbilityEvent, SceneKind>> = {
@@ -660,7 +736,9 @@ export function BossView({
       covered: 'covered',
       treasury: 'treasury',
       'bulwark-broken': 'ice-shatter',
-      'crit-blocked': 'karate-block',
+      'crit-blocked': 'steel-shield',
+      soup: 'turtle-soup',
+      'soup-cooled': 'soup-cool',
     };
     const kind = SCENES[top];
     // Gru's freeze waits for the ray's bolt to reach him.
@@ -668,7 +746,9 @@ export function BossView({
     else if (kind) playScene(kind);
 
     if (events.includes('bulwark-broken')) feedback.iceShatter();
-    if (events.includes('crit-blocked')) feedback.karateBlock();
+    if (events.includes('crit-blocked')) feedback.shieldBlock();
+    if (events.includes('soup')) feedback.soupDinner();
+    if (events.includes('soup-cooled')) feedback.soupCool();
     // An End crystal: the arrow into it, then the blast.
     if (events.includes('crystal')) {
       feedback.arrow();
@@ -749,6 +829,7 @@ export function BossView({
     if (!kind) return;
     window.setTimeout(() => {
       if (kind === 'boss-intro') return playEntrance(boss.line);
+      if (kind === 'finale') return setFinale(true);
       const STAMP_FOR: Partial<Record<SceneKind, AbilityEvent>> = {
         freeze: 'frozen',
         scream: 'scream',
@@ -758,14 +839,16 @@ export function BossView({
         crystal: 'crystal',
         covered: 'covered',
         treasury: 'treasury',
-        'karate-block': 'crit-blocked',
+        'steel-shield': 'crit-blocked',
+        'turtle-soup': 'soup',
+        'soup-cool': 'soup-cooled',
       };
       const event = STAMP_FOR[kind];
       if (event) playAbilityEvents([event]);
-      else if (kind === 'penguins-wave' || kind === 'crown-roll') playScene(kind, hpBarRef.current?.getBoundingClientRect());
+      else if (kind === 'penguins-wave' || kind === 'crown-roll' || kind === 'mousers') playScene(kind, hpBarRef.current?.getBoundingClientRect());
       else playScene(kind);
       // A boss's send-off holds the stage, as it does for real.
-      if (kind === 'penguins-wave' || kind === 'minions-carry' || kind === 'pig-poof' || kind === 'coin-spill' || kind === 'dizzy' || kind === 'power-out' || kind === 'jack-box' || kind === 'smoke-cape' || kind === 'crown-roll' || kind === 'ender-death') {
+      if (kind === 'penguins-wave' || kind === 'minions-carry' || kind === 'pig-poof' || kind === 'coin-spill' || kind === 'dizzy' || kind === 'power-out' || kind === 'jack-box' || kind === 'smoke-cape' || kind === 'crown-roll' || kind === 'ender-death' || kind === 'cowabunga') {
         holdStage(SCENE_MS[kind]);
       }
     }, 400);
@@ -814,6 +897,24 @@ export function BossView({
     }
   };
 
+  const finaleEl = finale && (
+    <Finale
+      feedback={feedback}
+      level={derived.level}
+      totalPushups={profile.totalPushups}
+      bosses={profile.bossesDefeated.filter((id) => id !== BOSSES[BOSSES.length - 1].id).length}
+      intoFight={finaleIntoFight.current}
+      onDone={() => {
+        setFinale(false);
+        if (!finaleIntoFight.current) return;
+        finaleIntoFight.current = false;
+        // Out of the finale and into the fight: the "BOSS" cut, then the scouting report.
+        briefAfterEntrance.current = true;
+        playEntrance(boss.line);
+      }}
+    />
+  );
+
   if (derived.allBossesDefeated) {
     return (
       <div className="arena-page flex flex-col items-center pb-8 pt-16 text-center">
@@ -821,28 +922,47 @@ export function BossView({
         <p className="mt-2 text-sm text-arena-text-dim">
           Ты прошёл всех {BOSSES.length} противников. Заходи в Speed Rush, чтобы продолжать качаться и бить рекорды.
         </p>
+        <button
+          type="button"
+          onClick={() => setFinale(true)}
+          className="mt-5 rounded-xl border border-arena-border px-4 py-2 text-sm text-arena-text-dim"
+        >
+          Посмотреть финал ещё раз
+        </button>
+        {finaleEl}
       </div>
     );
   }
 
   return (
     <div className="arena-page pb-8 pt-6">
-      {/* A rematch says so, with the way out: the real progress waits until he falls or you leave. */}
+      {/* A rematch says so, with the way out: the real progress waits until he falls or you leave.
+          Loud on purpose, and stuck to the top of the screen — it's easy to forget you're in one
+          and keep grinding old stages while the real one sits waiting. */}
       {derived.replaying && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-3 flex items-center justify-between gap-2 rounded-2xl border border-arena-amber/50 bg-arena-amber/10 px-3 py-2"
+          animate={{
+            opacity: 1,
+            y: 0,
+            boxShadow: ['0 0 0 0 rgba(245,158,11,0.55)', '0 0 0 7px rgba(245,158,11,0)', '0 0 0 0 rgba(245,158,11,0)'],
+          }}
+          transition={{ boxShadow: { duration: 2, repeat: Infinity }, default: { duration: 0.3 } }}
+          className="sticky z-30 mb-3 flex items-center gap-3 rounded-2xl border-2 border-arena-amber bg-gradient-to-r from-[#3a2a0c] to-arena-surface px-3 py-2.5"
+          style={{ top: 'calc(env(safe-area-inset-top) + 6px)' }}
         >
-          <span className="text-xs leading-snug text-arena-text">
-            <b className="text-arena-amber">Перепрохождение</b> · твой этап {(profile.replay?.returnTo.currentBossIndex ?? 0) + 1}{' '}
-            ждёт впереди
+          <RotateCcw size={22} className="shrink-0 text-arena-amber" />
+          <span className="min-w-0 flex-1 leading-tight">
+            <b className="block text-sm text-arena-amber">Перепрохождение</b>
+            <span className="text-[11px] text-arena-text">
+              Твой этап {(profile.replay?.returnTo.currentBossIndex ?? 0) + 1} ждёт — выйди, чтобы вернуться к нему
+            </span>
           </span>
           <button
             onClick={() => void endReplay()}
-            className="shrink-0 rounded-lg bg-arena-surface-2 px-2.5 py-1 text-[11px] font-semibold text-arena-text active:scale-95"
+            className="flex shrink-0 items-center gap-1.5 rounded-xl bg-arena-amber px-3 py-2 text-sm font-bold text-black shadow-[0_3px_0_#92400e] active:translate-y-[2px] active:shadow-none"
           >
-            Выйти
+            <LogOut size={15} /> Выйти
           </button>
         </motion.div>
       )}
@@ -921,7 +1041,7 @@ export function BossView({
             transition={{ type: 'spring', stiffness: 260, damping: 24 }}
             className="relative flex flex-col items-center"
           >
-            {enemy.isBoss && (
+            {abilitiesOn && (
               <AbilityStatus
                 boss={boss}
                 fight={frostPending ? { ...profile.fight, frozenLeft: 0 } : profile.fight}
@@ -934,19 +1054,19 @@ export function BossView({
                 <IceShield
                   // Not while he's walking out and saying his piece: the shield goes up once
                   // he's done talking, as the fight starts.
-                  ready={!bossIntro && !talking}
+                  ready={abilitiesOn}
                   hpFrac={profile.enemyHp / Math.max(1, profile.fight.enemyMaxHp || enemy.hp)}
                   hitId={hit?.id ?? null}
                 />
               )}
-              {enemy.isBoss && hasAbility(boss.abilities, 'retreat') && <RetreatPlaster used={!!profile.fight.retreatUsed} />}
-              {enemy.isBoss && boss.id === 'nameless' && (
+              {abilitiesOn && hasAbility(boss.abilities, 'retreat') && <RetreatPlaster used={!!profile.fight.retreatUsed} />}
+              {abilitiesOn && boss.id === 'nameless' && (
                 <>
                   <EndHitParticles hitId={hit?.id ?? null} />
                   <DragonWeak active={hpFrac > 0 && hpFrac < 0.15} />
                 </>
               )}
-              {enemy.isBoss && hasAbility(boss.abilities, 'endCrystals') && (
+              {abilitiesOn && hasAbility(boss.abilities, 'endCrystals') && (
                 <EndCrystals
                   broken={profile.fight.crystalsBroken ?? 0}
                   progress={profile.fight.setReps % CRYSTAL_REPS}
@@ -956,13 +1076,20 @@ export function BossView({
               {!enemy.isBoss && hasAbility(boss.abilities, 'infection') && (
                 <InfectionBadge left={Math.max(0, abilityValue(boss.abilities, 'infection') - profile.fight.repsOnEnemy)} />
               )}
-              {enemy.isBoss && hasAbility(boss.abilities, 'treasury') && (
+              {abilitiesOn && hasAbility(boss.abilities, 'treasury') && (
                 <BogatyrWall left={profile.fight.guardLeft ?? 0} of={abilityValue(boss.abilities, 'treasury')} hitId={hit?.id ?? null} />
               )}
-              {enemy.isBoss && hasAbility(boss.abilities, 'enrage') && (
+              {abilitiesOn && hasAbility(boss.abilities, 'enrage') && (
                 <EnrageEyes active={hpFrac > 0 && hpFrac < 0.4} eyes={boss.id === 'titanprime'} />
               )}
-              {enemy.isBoss && hasAbility(boss.abilities, 'freezeRay') && (
+              <ShredderAmbient
+                active={abilitiesOn && boss.id === 'stormborn' && !derived.allBossesDefeated && interlude == null}
+                hitId={hit?.id ?? null}
+              />
+              {abilitiesOn && hasAbility(boss.abilities, 'turtleSoup') && interlude == null && (
+                <SoupPot heat={profile.fight.soupHeat ?? 0} of={SOUP_BOILS_AFTER} />
+              )}
+              {abilitiesOn && hasAbility(boss.abilities, 'freezeRay') && (
                 <IceBlock frozenLeft={profile.fight.frozenLeft ?? 0} of={abilityValue(boss.abilities, 'freezeRay')} />
               )}
               {enemy.isBoss ? (
@@ -976,6 +1103,7 @@ export function BossView({
                     maxShape={ART_MAX_SHAPE}
                     hug
                     bare
+                    original={false}
                   />
                 </BossTalk>
               ) : (
@@ -1069,7 +1197,7 @@ export function BossView({
             animate={{ width: `${shownPct}%` }}
             transition={{ type: 'spring', stiffness: 140, damping: 22 }}
           />
-          {enemy.isBoss && interlude == null && <HpMarks marks={hpMarks(boss, profile.fight)} pct={hpPct} />}
+          {abilitiesOn && interlude == null && <HpMarks marks={hpMarks(boss, profile.fight)} pct={hpPct} />}
           {/* Under a quarter left the bar breathes — the moment you should push harder is the
               one moment the screen shouldn't be still. */}
           {interlude == null && hpPct > 0 && hpPct <= 25 && (
@@ -1120,10 +1248,10 @@ export function BossView({
       </motion.div>
 
       {/* Gru's ray: the edges of the screen ice over while reps are frozen. */}
-      <FrostOverlay active={enemy.isBoss && !frostPending && (profile.fight.frozenLeft ?? 0) > 0} />
+      <FrostOverlay active={abilitiesOn && !frostPending && (profile.fight.frozenLeft ?? 0) > 0} />
       <LightsFlicker active={screamNear} />
       <EnderAmbient
-        active={enemy.isBoss && !derived.allBossesDefeated && boss.id === 'nameless' && interlude == null && !bossIntro}
+        active={abilitiesOn && !derived.allBossesDefeated && boss.id === 'nameless' && interlude == null}
         under={() => artRef.current?.getBoundingClientRect().bottom ?? null}
         onTeleport={feedback.teleport}
       />
@@ -1132,7 +1260,7 @@ export function BossView({
         // none (the one carried over from his last minion, say) has nothing to lose.
         enabled={
           !derived.allBossesDefeated &&
-          enemy.isBoss &&
+          abilitiesOn &&
           hasAbility(boss.abilities, 'teamwork') &&
           interlude == null &&
           profile.fight.damageThisSet > 0
@@ -1144,23 +1272,23 @@ export function BossView({
         onBeep={feedback.communicator}
       />
       <LaughGas
-        active={enemy.isBoss && !derived.allBossesDefeated && hasAbility(boss.abilities, 'jokerCard') && interlude == null}
+        active={abilitiesOn && !derived.allBossesDefeated && hasAbility(boss.abilities, 'jokerCard') && interlude == null}
         under={() => artRef.current?.getBoundingClientRect().bottom ?? null}
       />
       <CameraFeed
-        active={enemy.isBoss && !!profile.fight.scream}
+        active={abilitiesOn && !!profile.fight.scream}
         reps={profile.fight.scream?.reps ?? 0}
         need={abilityValue(boss.abilities, 'scream')}
       />
       <MomWatch
-        enabled={!derived.allBossesDefeated && enemy.isBoss && hasAbility(boss.abilities, 'strictMom')}
+        enabled={!derived.allBossesDefeated && abilitiesOn && hasAbility(boss.abilities, 'strictMom')}
         lastRepAt={profile.fight.lastRepAt}
         limitMs={abilityValue(boss.abilities, 'strictMom')}
       />
       <FreezeRayWarning
         enabled={
           !derived.allBossesDefeated &&
-          enemy.isBoss &&
+          abilitiesOn &&
           hasAbility(boss.abilities, 'freezeRay') &&
           (profile.fight.frozenLeft ?? 0) === 0
         }
@@ -1223,6 +1351,8 @@ export function BossView({
           />
         )}
       </AnimatePresence>
+
+      {finaleEl}
     </div>
   );
 }

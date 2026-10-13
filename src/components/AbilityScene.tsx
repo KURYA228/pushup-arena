@@ -5,6 +5,7 @@ import { Minion } from './Minion';
 import { Penguin } from './Penguin';
 import { BeastBoy, Cyborg, Raven, Starfire } from './Titans';
 import { Antipka, BOGATYRS, Bogatyr } from './Kyiv';
+import { FootNinja, Mouser, Turtle } from './ShredderFx';
 
 /**
  * The bosses' abilities, acted out. Each signature move gets a little scene of its own over the
@@ -48,12 +49,18 @@ export type SceneKind =
   | 'jack-box'
   | 'scold'
   | 'slipper'
-  | 'karate-block'
+  | 'steel-shield'
   | 'dizzy'
   | 'tribute'
   | 'treasury'
   | 'crown-roll'
-  | 'coin-spill';
+  | 'coin-spill'
+  | 'foot-ninja'
+  | 'turtle-soup'
+  | 'soup-cool'
+  | 'laser-volley'
+  | 'mousers'
+  | 'cowabunga';
 
 export interface Scene {
   id: number;
@@ -63,6 +70,8 @@ export interface Scene {
   y: number;
   /** The boss's picture, for the scenes that bring him at you. */
   art?: string;
+  /** Which way round a scene with two versions plays — see the scene itself. */
+  variant?: number;
 }
 
 /** How long each scene runs, so the caller can clear it. */
@@ -84,7 +93,8 @@ export const SCENE_MS: Record<SceneKind, number> = {
   'creeper-boom': 1600,
   'ender-death': 8200,
   'dragon-roar': 1600,
-  covered: 2700,
+  // A touch past the Titans' own 2.6 s, for their T to finish going.
+  covered: 2900,
   'staff-block': 800,
   'smoke-cape': 2800,
   coins: 1400,
@@ -96,12 +106,18 @@ export const SCENE_MS: Record<SceneKind, number> = {
   'jack-box': 3000,
   scold: 900,
   slipper: 1200,
-  'karate-block': 900,
+  'steel-shield': 950,
   dizzy: 2600,
   tribute: 1900,
   treasury: 2300,
   'crown-roll': 5200,
   'coin-spill': 2600,
+  'foot-ninja': 1100,
+  'turtle-soup': 2000,
+  'soup-cool': 950,
+  'laser-volley': 700,
+  'mousers': 2400,
+  cowabunga: 3500,
 };
 
 /**
@@ -154,12 +170,18 @@ const BODIES: Record<SceneKind, (p: BodyProps) => React.ReactNode> = {
   'jack-box': JackBox,
   scold: Scold,
   slipper: Slipper,
-  'karate-block': KarateBlock,
+  'steel-shield': SteelShield,
   dizzy: Dizzy,
   tribute: Tribute,
   treasury: Treasury,
   'crown-roll': CrownRoll,
   'coin-spill': CoinSpill,
+  'foot-ninja': FootNinjaSub,
+  'turtle-soup': TurtleSoupDinner,
+  'soup-cool': SoupCool,
+  'laser-volley': LaserVolley,
+  mousers: Mousers,
+  cowabunga: Cowabunga,
 };
 
 /* --------------------------------- helpers -------------------------------- */
@@ -654,6 +676,8 @@ function Crystal({ scene }: BodyProps) {
  * whole, flares up into a dome over him. Then they're gone, and the damage it undid rises off him.
  */
 const SHIELD_R = 118;
+/** How long the T in the middle lasts, from the start of the scene. */
+const TITANS_T = 2.8;
 /** Each Titan's share of the ring: where it starts (degrees, 0 = right, clockwise) and its colour. */
 const ARCS = [
   { from: 135, color: '#38bdf8', at: 0.62 }, // Cyborg — the left
@@ -714,6 +738,39 @@ function Covered({ scene }: BodyProps) {
         animate={{ scale: [0.9, 0.9, 1.08, 1, 1], opacity: [0, 0, 1, 0.8, 0] }}
         transition={{ duration: T, times: [0, at(1.78), at(1.9), at(2.15), 1] }}
       />
+      {/* And in the middle of it, their T — the ring round it makes it the team's badge. It
+          punches in as the dome flares, holds long enough to be read and is gone a moment
+          after the Titans; it runs on its own clock (TITANS_T) for that reason. */}
+      <motion.svg
+        className="absolute overflow-visible"
+        style={{ left: -R * 0.55, top: -R * 0.55, filter: 'drop-shadow(0 0 8px #38bdf8) drop-shadow(0 0 18px #a855f7)' }}
+        width={R * 1.1}
+        height={R * 1.1}
+        viewBox="0 0 100 100"
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 0, 1.35, 1, 1, 1.15], opacity: [0, 0, 1, 1, 1, 0] }}
+        transition={{
+          duration: TITANS_T,
+          times: [0, 1.8 / TITANS_T, 1.95 / TITANS_T, 2.1 / TITANS_T, 2.5 / TITANS_T, 1],
+          ease: 'easeOut',
+        }}
+      >
+        <defs>
+          <linearGradient id="titans-t" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="55%" stopColor="#fde68a" />
+            <stop offset="100%" stopColor="#f59e0b" />
+          </linearGradient>
+        </defs>
+        {/* A heavy T with its crossbar flared at the ends and the stem tapering to the foot. */}
+        <path
+          d="M8 12 L92 12 L86 32 L60 32 L56 90 L44 90 L40 32 L14 32 Z"
+          fill="url(#titans-t)"
+          stroke="#1e1b4b"
+          strokeWidth={4}
+          strokeLinejoin="round"
+        />
+      </motion.svg>
 
       {/* Cyborg: runs in from the left, aims, fires into the left of the ring. */}
       <motion.div
@@ -1838,61 +1895,103 @@ function Slipper({ scene }: BodyProps) {
 }
 
 /**
- * "Стальная воля": the crit you rolled is caught — a blue paw chops across and stops the blow
- * dead, with a burst where they meet and a karate "ХА!".
+ * "Стальная воля": the crit you rolled meets a steel shield. It slams up in front of him, the blow lands on it — sparks off the face, a ring of
+ * force, the shield jolting back — and it sinks away. The word itself comes from the stamp.
  */
-function KarateBlock({ scene }: BodyProps) {
-  const side = Math.random() < 0.5 ? -1 : 1;
+/** How long the shield is up, and when in that it starts sinking away (s) — the stamp goes then too. */
+const STEEL_SHIELD_SEC = 0.9;
+const STEEL_SHIELD_FADE_SEC = 0.68;
+export const STEEL_SHIELD_FADE_MS = STEEL_SHIELD_FADE_SEC * 1000;
+
+function SteelShield({ scene }: BodyProps) {
+  const sparks = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) => {
+        const a = (i / 12) * Math.PI * 2 + rand(-0.2, 0.2);
+        const d = rand(70, 120);
+        return { x: Math.cos(a) * d, y: Math.sin(a) * d, s: rand(4, 8) };
+      }),
+    [],
+  );
+  const W = 120;
+  const H = 140;
   return (
     <At x={scene.x} y={scene.y}>
-      {/* The paw: a blue cat's open hand, chopping in edge-first. */}
-      <motion.div
-        className="absolute"
-        style={{
-          width: 120,
-          height: 46,
-          left: -60,
-          top: -23,
-          borderRadius: '40% 60% 60% 40% / 50%',
-          background: 'linear-gradient(180deg, #7dd3fc, #3fa9e0 60%, #1d6fa5)',
-          border: '3px solid #0c4a6e',
-          boxShadow: '0 0 18px rgba(63,169,224,0.8)',
+      {/* The shield: a heater of polished steel with a riveted rim and a boss in the middle. */}
+      <motion.svg
+        className="absolute overflow-visible"
+        style={{ left: -W / 2, top: -H / 2, filter: 'drop-shadow(0 6px 14px rgba(0,0,0,0.6)) drop-shadow(0 0 12px rgba(186,230,253,0.5))' }}
+        width={W}
+        height={H}
+        viewBox="0 0 120 140"
+        initial={{ y: 80, scale: 0.4, opacity: 0 }}
+        animate={{
+          y: [80, 0, 0, 0, 0, 0, 30],
+          x: [0, 0, 0, -7, 6, -3, 0],
+          scale: [0.4, 1.12, 1, 0.95, 1, 1, 0.9],
+          opacity: [0, 1, 1, 1, 1, 1, 0],
         }}
-        initial={{ x: side * 220, rotate: side * -40, opacity: 0 }}
-        animate={{ x: [side * 220, side * 20, side * 26, side * 60], rotate: [side * -40, side * -18, side * -18, side * -10], opacity: [0, 1, 1, 0] }}
-        transition={{ duration: 0.8, times: [0, 0.25, 0.6, 1], ease: 'easeOut' }}
-      />
-      {/* Where it meets the blow. */}
-      <motion.div
-        className="absolute"
-        style={{
-          width: 120,
-          height: 120,
-          left: -60,
-          top: -60,
-          clipPath: 'polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
-          background: 'radial-gradient(circle, #ffffff, #bae6fd 50%, #3fa9e0)',
+        transition={{
+          duration: STEEL_SHIELD_SEC,
+          times: [0, 0.18, 0.26, 0.32, 0.4, STEEL_SHIELD_FADE_SEC / STEEL_SHIELD_SEC, 1],
+          ease: 'easeOut',
         }}
-        initial={{ scale: 0, opacity: 0, rotate: 0 }}
-        animate={{ scale: [0, 0, 1.3, 1], opacity: [0, 0, 1, 0], rotate: 30 }}
-        transition={{ duration: 0.8, times: [0, 0.22, 0.32, 1] }}
+      >
+        <defs>
+          <linearGradient id="steel-face" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#f8fafc" />
+            <stop offset="35%" stopColor="#cbd5e1" />
+            <stop offset="65%" stopColor="#94a3b8" />
+            <stop offset="100%" stopColor="#475569" />
+          </linearGradient>
+          <radialGradient id="steel-boss" cx="40%" cy="35%" r="60%">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="50%" stopColor="#cbd5e1" />
+            <stop offset="100%" stopColor="#334155" />
+          </radialGradient>
+        </defs>
+        <path d="M60 4 L114 16 L114 62 C114 100 90 124 60 136 C30 124 6 100 6 62 L6 16 Z" fill="#1e293b" />
+        <path d="M60 11 L107 21 L107 62 C107 96 86 117 60 128 C34 117 13 96 13 62 L13 21 Z" fill="url(#steel-face)" />
+        {/* The light catching the upper left of it. */}
+        <path d="M60 11 L107 21 L107 34 C80 30 40 40 13 58 L13 21 Z" fill="#ffffff" opacity={0.25} />
+        {[
+          [60, 18],
+          [100, 27],
+          [20, 27],
+          [100, 70],
+          [20, 70],
+          [60, 120],
+        ].map(([cx, cy]) => (
+          <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={3} fill="#e2e8f0" stroke="#334155" strokeWidth={1.5} />
+        ))}
+        <circle cx={60} cy={64} r={17} fill="url(#steel-boss)" stroke="#1e293b" strokeWidth={3} />
+      </motion.svg>
+
+      {/* The blow landing on it: a flash, sparks off the face, a ring of force. */}
+      <motion.div
+        className="absolute rounded-full"
+        style={{ width: 90, height: 90, left: -45, top: -45, background: 'radial-gradient(circle, #ffffff, rgba(186,230,253,0.7) 40%, transparent 70%)' }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 0, 1.4, 1.8], opacity: [0, 0, 1, 0] }}
+        transition={{ duration: 0.6, times: [0, 0.4, 0.5, 1] }}
       />
       <motion.div
         className="absolute rounded-full border-4"
-        style={{ width: 60, height: 60, left: -30, top: -30, borderColor: '#bae6fd', boxShadow: '0 0 16px #3fa9e0' }}
+        style={{ width: 70, height: 70, left: -35, top: -35, borderColor: '#e0f2fe', boxShadow: '0 0 16px #7dd3fc' }}
         initial={{ scale: 0.3, opacity: 0 }}
-        animate={{ scale: [0.3, 0.3, 3.2], opacity: [0, 1, 0] }}
-        transition={{ duration: 0.7, times: [0, 0.3, 1] }}
+        animate={{ scale: [0.3, 0.3, 3], opacity: [0, 1, 0] }}
+        transition={{ duration: 0.75, times: [0, 0.36, 1] }}
       />
-      <motion.span
-        className="absolute whitespace-nowrap text-3xl"
-        style={{ left: -side * 70 - 24, top: -80, fontFamily: "'Russo One', sans-serif", color: '#e0f2fe', WebkitTextStroke: '1.5px #0c4a6e', textShadow: '0 3px 0 #0c4a6e' }}
-        initial={{ opacity: 0, scale: 0.4, y: 10 }}
-        animate={{ opacity: [0, 0, 1, 0], scale: [0.4, 0.4, 1.2, 1], y: [10, 10, 0, -14] }}
-        transition={{ duration: 0.85, times: [0, 0.25, 0.4, 1] }}
-      >
-        ХА!
-      </motion.span>
+      {sparks.map((s, i) => (
+        <motion.span
+          key={i}
+          className="absolute block rounded-full"
+          style={{ width: s.s, height: s.s, marginLeft: -s.s / 2, marginTop: -s.s / 2, background: '#fef9c3', boxShadow: '0 0 8px #fde047' }}
+          initial={{ x: 0, y: 0, opacity: 0 }}
+          animate={{ x: [0, 0, s.x], y: [0, 0, s.y + 20], opacity: [0, 1, 0] }}
+          transition={{ duration: 0.6, delay: 0.27, times: [0, 0.05, 1], ease: 'easeOut' }}
+        />
+      ))}
     </At>
   );
 }
@@ -2742,5 +2841,284 @@ function EnderDeath({ scene }: BodyProps) {
         />
       ))}
     </>
+  );
+}
+
+/* --------------------------------- Шреддер -------------------------------- */
+
+/**
+ * "Слепая зона", the Foot Clan's way: a ninja leaps in front of him and takes the blow, then
+ * is gone in a puff of smoke — which is why that rep didn't land.
+ */
+function FootNinjaSub({ scene }: BodyProps) {
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const puffs = useMemo(() => Array.from({ length: 9 }, () => ({ x: rand(-50, 50), y: rand(-40, 50), s: rand(30, 56) })), []);
+  return (
+    <At x={scene.x} y={scene.y}>
+      <motion.div
+        className="absolute"
+        style={{ left: -45, top: -55 }}
+        initial={{ x: side * 240, y: 40, rotate: side * 30, opacity: 0 }}
+        animate={{ x: [side * 240, 0, 0], y: [40, -30, 0], rotate: [side * 30, 0, 0], opacity: [0, 1, 1, 0] }}
+        transition={{ duration: 0.75, times: [0, 0.4, 0.6, 0.62] }}
+      >
+        <FootNinja size={90} />
+      </motion.div>
+      {puffs.map((p, i) => (
+        <motion.span
+          key={i}
+          className="absolute block rounded-full"
+          style={{ width: p.s, height: p.s, left: p.x - p.s / 2, top: p.y - p.s / 2, background: 'radial-gradient(circle, #9ca3af, #4b5563 60%, transparent 72%)' }}
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: [0, 0, 1.3, 1.6], opacity: [0, 0, 0.95, 0] }}
+          transition={{ duration: 1.05, times: [0, 0.43, 0.55, 1] }}
+        />
+      ))}
+      <motion.span
+        className="absolute whitespace-nowrap text-2xl"
+        style={{ left: -side * 70 - 34, top: -96, fontFamily: "'Russo One', sans-serif", color: '#e5e7eb', WebkitTextStroke: '1.5px #111827', textShadow: '0 3px 0 #111827' }}
+        initial={{ opacity: 0, scale: 0.5 }}
+        animate={{ opacity: [0, 0, 1, 0], scale: [0.5, 0.5, 1.15, 1] }}
+        transition={{ duration: 1, times: [0, 0.45, 0.55, 1] }}
+      >
+        ПУФ!
+      </motion.span>
+    </At>
+  );
+}
+
+/**
+ * "Суп из черепашек" boiling: a steaming bowl comes up to him, the ladle tips, he slurps — and
+ * the healing (shown by the HP pop) is his dinner.
+ */
+function TurtleSoupDinner({ scene }: BodyProps) {
+  const steam = useMemo(() => Array.from({ length: 6 }, (_, i) => ({ x: -36 + i * 14, delay: i * 0.12 })), []);
+  return (
+    <At x={scene.x} y={scene.y}>
+      <motion.div
+        className="absolute"
+        style={{ left: -60, top: 30 }}
+        initial={{ y: 160, opacity: 0 }}
+        animate={{ y: [160, 0, 0, -10, 160], opacity: [0, 1, 1, 1, 0] }}
+        transition={{ duration: 1.9, times: [0, 0.2, 0.6, 0.75, 1], ease: 'easeOut' }}
+      >
+        <svg width={120} height={70} viewBox="0 0 120 70" aria-hidden>
+          <path d="M6 18 L114 18 C112 48 90 66 60 66 C30 66 8 48 6 18 Z" fill="#7f1d1d" stroke="#450a0a" strokeWidth={3} />
+          <ellipse cx={60} cy={18} rx={54} ry={8} fill="#65a30d" stroke="#450a0a" strokeWidth={3} />
+          <ellipse cx={72} cy={16} rx={13} ry={5} fill="#4d7c0f" stroke="#1a2e05" strokeWidth={1.5} />
+          <circle cx={40} cy={17} r={3} fill="#a3e635" />
+          <circle cx={52} cy={19} r={2} fill="#a3e635" />
+        </svg>
+        {steam.map((s, i) => (
+          <motion.span
+            key={i}
+            className="absolute block rounded-full"
+            style={{ left: 60 + s.x, top: -6, width: 12, height: 22, background: 'rgba(226,232,240,0.6)', filter: 'blur(3px)' }}
+            animate={{ y: [0, -50], scaleX: [1, 2], opacity: [0, 0.8, 0] }}
+            transition={{ duration: 1.1, delay: s.delay, repeat: 1 }}
+          />
+        ))}
+      </motion.div>
+      {/* The ladle, scooping up to him. */}
+      <motion.div
+        className="absolute"
+        style={{ left: 10, top: 10, originX: 0, originY: 1 }}
+        initial={{ opacity: 0, rotate: 40 }}
+        animate={{ opacity: [0, 0, 1, 1, 0], rotate: [40, 40, 40, -35, -35], y: [0, 0, 20, -50, -50] }}
+        transition={{ duration: 1.9, times: [0, 0.25, 0.35, 0.6, 0.75] }}
+      >
+        <svg width={70} height={20} viewBox="0 0 70 20" aria-hidden>
+          <rect x={0} y={7} width={50} height={5} rx={2.5} fill="#9ca3af" stroke="#374151" strokeWidth={1.5} />
+          <ellipse cx={58} cy={10} rx={11} ry={8} fill="#9ca3af" stroke="#374151" strokeWidth={1.5} />
+          <ellipse cx={58} cy={8} rx={8} ry={4} fill="#65a30d" />
+        </svg>
+      </motion.div>
+      <motion.span
+        className="absolute whitespace-nowrap text-3xl"
+        style={{ left: -40, top: -110, fontFamily: "'Russo One', sans-serif", color: '#bef264', WebkitTextStroke: '1.5px #1a2e05', textShadow: '0 3px 0 #1a2e05' }}
+        initial={{ opacity: 0, scale: 0.4 }}
+        animate={{ opacity: [0, 0, 1, 0], scale: [0.4, 0.4, 1.2, 1], y: [0, 0, 0, -16] }}
+        transition={{ duration: 1.9, times: [0, 0.55, 0.65, 1] }}
+      >
+        ХЛЮП!
+      </motion.span>
+    </At>
+  );
+}
+
+/** The pot taken off the heat by a long set: a burst of steam and cold drops. */
+function SoupCool({ scene }: BodyProps) {
+  const drops = useMemo(() => Array.from({ length: 12 }, () => ({ x: rand(-90, 90), up: rand(30, 90) })), []);
+  return (
+    <At x={scene.x} y={scene.y}>
+      <motion.div
+        className="absolute rounded-full"
+        style={{ width: 160, height: 100, left: -80, top: 20, background: 'radial-gradient(ellipse, rgba(224,242,254,0.85), rgba(186,230,253,0.3) 55%, transparent 72%)', filter: 'blur(4px)' }}
+        initial={{ scale: 0.4, opacity: 0 }}
+        animate={{ scale: [0.4, 1.3, 1.6], opacity: [0, 0.9, 0], y: [0, -30, -60] }}
+        transition={{ duration: 0.9 }}
+      />
+      {drops.map((d, i) => (
+        <motion.span
+          key={i}
+          className="absolute block rounded-full"
+          style={{ width: 6, height: 9, left: d.x, top: 50, background: '#7dd3fc', boxShadow: '0 0 6px #38bdf8' }}
+          initial={{ y: 0, opacity: 0 }}
+          animate={{ y: [0, -d.up, 40], opacity: [0, 1, 0] }}
+          transition={{ duration: 0.85, ease: 'easeOut' }}
+        />
+      ))}
+    </At>
+  );
+}
+
+/**
+ * Bebop or Rocksteady walking on: a volley from his gun — the muzzle flashing at his side and
+ * three laser bolts coming straight out of the picture at you.
+ */
+function LaserVolley({ scene }: BodyProps) {
+  // Bebop (1) holds his gun low on the right of his picture, Rocksteady (-1) his on the left.
+  const side = scene.variant ?? 1;
+  const gun = { x: side * 70, y: 40 };
+  const color = side > 0 ? '#e879f9' : '#fb923c';
+  return (
+    <At x={scene.x} y={scene.y}>
+      {[0, 1, 2].map((i) => (
+        <motion.div key={`f${i}`} className="absolute rounded-full" style={{ left: gun.x - 30, top: gun.y - 30, width: 60, height: 60, background: `radial-gradient(circle, #fff, ${color} 40%, transparent 70%)` }} initial={{ scale: 0, opacity: 0 }} animate={{ scale: [0, 1.2, 0], opacity: [0, 1, 0] }} transition={{ duration: 0.18, delay: i * 0.12 }} />
+      ))}
+      {[0, 1, 2].map((i) => {
+        const tx = gun.x + side * rand(30, 120);
+        const ty = gun.y + rand(80, 220);
+        return (
+          <motion.div
+            key={`b${i}`}
+            className="absolute rounded-full"
+            style={{ left: gun.x - 14, top: gun.y - 5, width: 28, height: 10, background: `linear-gradient(90deg, #fff, ${color})`, boxShadow: `0 0 12px ${color}, 0 0 24px ${color}` }}
+            initial={{ x: 0, y: 0, scale: 0.4, opacity: 0 }}
+            animate={{ x: tx - gun.x, y: ty - gun.y, scale: [0.4, 2.6], opacity: [0, 1, 1, 0] }}
+            transition={{ duration: 0.35, delay: i * 0.12, ease: 'easeIn' }}
+          />
+        );
+      })}
+    </At>
+  );
+}
+
+/**
+ * Stockman down: his mousers pour out and scuttle the length of the health bar, jaws snapping,
+ * before the boss himself walks out. Placed on the bar.
+ */
+function Mousers({ scene }: BodyProps) {
+  const w = window.innerWidth;
+  const pack = useMemo(() => Array.from({ length: 6 }, (_, i) => ({ delay: i * 0.17, y: rand(-30, -8), s: rand(30, 40) })), []);
+  return (
+    <At x={scene.x} y={scene.y}>
+      {pack.map((m, i) => (
+        <motion.div
+          key={i}
+          className="absolute"
+          style={{ left: -m.s / 2, top: m.y - m.s / 2 }}
+          initial={{ x: -w / 2 - 60 }}
+          animate={{ x: w / 2 + 60, y: [0, -4, 0, -4, 0, -4, 0] }}
+          transition={{ duration: 1.3, delay: m.delay, ease: 'linear' }}
+        >
+          <Mouser size={m.s} bite={i * 0.05} />
+        </motion.div>
+      ))}
+    </At>
+  );
+}
+
+/**
+ * Shredder going down: he shudders, his helmet comes off and clangs across the floor, pieces of
+ * his armour scatter — and the four of them come running through, bandanas flying, pizza in the
+ * air, with the shout that ends every one of their fights.
+ */
+function Cowabunga({ scene }: BodyProps) {
+  const T = 3.4;
+  const at = (s: number) => s / T;
+  const w = window.innerWidth;
+  const shards = useMemo(() => Array.from({ length: 10 }, () => ({ dx: rand(-160, 160), up: rand(40, 140), r: rand(-400, 400), s: rand(10, 22) })), []);
+  const pizza = useMemo(() => Array.from({ length: 8 }, (_, i) => ({ x: rand(-w * 0.4, w * 0.4), delay: 1.3 + i * 0.12, up: rand(120, 260), r: rand(-360, 360) })), [w]);
+  const TURTLES = ['#2563eb', '#dc2626', '#f97316', '#7c3aed'];
+  return (
+    <At x={scene.x} y={scene.y}>
+      {scene.art && (
+        <motion.div
+          className="absolute overflow-hidden rounded-full border-4 border-[#b91c1c]"
+          style={{ width: 150, height: 150, left: -75, top: -75, backgroundImage: `url(${scene.art})`, backgroundSize: 'cover', backgroundPosition: '45% 20%' }}
+          initial={{ x: 0, y: 0, rotate: 0, opacity: 1 }}
+          animate={{ x: [0, -6, 6, -6, 6, 0, 0], y: [0, 0, 0, 0, 0, 0, window.innerHeight * 0.5], rotate: [0, 0, 0, 0, 0, 0, -50], opacity: [1, 1, 1, 1, 1, 1, 0] }}
+          transition={{ duration: 1.3, times: [0, 0.08, 0.16, 0.24, 0.32, 0.4, 1], ease: 'easeIn' }}
+        />
+      )}
+      {/* The helmet: off his head, onto the floor, bouncing. */}
+      <motion.div
+        className="absolute"
+        style={{ left: -36, top: -110, filter: 'drop-shadow(0 0 6px rgba(239,68,68,0.6))' }}
+        initial={{ y: 0, opacity: 0 }}
+        animate={{ y: [0, 0, 170, 120, 170, 150, 170], x: [0, 0, 20, 40, 55, 62, 66], rotate: [0, 0, 40, 70, 95, 105, 110], opacity: [0, 1, 1, 1, 1, 1, 0] }}
+        transition={{ duration: T, times: [0, at(0.2), at(0.35), at(0.5), at(0.62), at(0.72), 1] }}
+      >
+        <svg width={72} height={78} viewBox="-4 -20 72 78" className="overflow-visible" aria-hidden>
+          {/* The crest: a tall blade up the middle, and a horn curving up either side. */}
+          <path d="M32 -18 L36 6 L28 6 Z" fill="#d1d5db" stroke="#1f2937" strokeWidth={2} strokeLinejoin="round" />
+          <path d="M16 14 C4 8 -2 -4 2 -16 C6 -6 12 2 22 8 Z" fill="#d1d5db" stroke="#1f2937" strokeWidth={2} strokeLinejoin="round" />
+          <path d="M48 14 C60 8 66 -4 62 -16 C58 -6 52 2 42 8 Z" fill="#d1d5db" stroke="#1f2937" strokeWidth={2} strokeLinejoin="round" />
+          {/* The dome. */}
+          <path d="M8 32 C8 14 19 4 32 4 C45 4 56 14 56 32 Z" fill="#9ca3af" stroke="#1f2937" strokeWidth={2.5} />
+          <path d="M16 14 C22 9 28 8 32 8" stroke="#f3f4f6" strokeWidth={2} fill="none" strokeLinecap="round" />
+          {/* The face: a dark mask with his eyes still burning in it. */}
+          <path d="M12 30 L52 30 L48 48 L32 56 L16 48 Z" fill="#111827" stroke="#1f2937" strokeWidth={2} strokeLinejoin="round" />
+          <rect x={18} y={35} width={10} height={3.5} rx={1.5} fill="#ef4444" />
+          <rect x={36} y={35} width={10} height={3.5} rx={1.5} fill="#ef4444" />
+          <path d="M32 30 L32 56" stroke="#374151" strokeWidth={2} />
+        </svg>
+      </motion.div>
+      {shards.map((p, i) => (
+        <motion.span
+          key={i}
+          className="absolute block"
+          style={{ width: p.s, height: p.s * 0.7, background: 'linear-gradient(135deg, #e5e7eb, #4b5563)', clipPath: 'polygon(0 0, 100% 20%, 70% 100%, 10% 70%)' }}
+          initial={{ x: 0, y: 0, opacity: 0 }}
+          animate={{ x: p.dx, y: [0, -p.up, 220], rotate: p.r, opacity: [0, 1, 1, 0] }}
+          transition={{ duration: 1.3, delay: 0.3, ease: 'easeOut' }}
+        />
+      ))}
+      {/* The turtles, running through in a line. */}
+      {TURTLES.map((c, i) => (
+        <motion.div
+          key={c}
+          className="absolute"
+          style={{ left: -40, top: 40 + (i % 2) * 18 }}
+          initial={{ x: -w / 2 - 120 }}
+          animate={{ x: w / 2 + 120, y: [0, -14, 0, -14, 0, -14, 0] }}
+          transition={{ duration: 1.5, delay: 1.1 + i * 0.16, ease: 'linear' }}
+        >
+          <Turtle size={84} bandana={c} />
+        </motion.div>
+      ))}
+      {pizza.map((p, i) => (
+        <motion.span
+          key={i}
+          className="absolute text-3xl"
+          style={{ left: p.x, top: 60 }}
+          initial={{ y: 0, opacity: 0 }}
+          animate={{ y: [0, -p.up, 120], rotate: p.r, opacity: [0, 1, 1, 0] }}
+          transition={{ duration: 1.5, delay: p.delay, ease: 'easeOut' }}
+        >
+          🍕
+        </motion.span>
+      ))}
+      <motion.span
+        className="absolute whitespace-nowrap"
+        style={{ left: 0, top: -150, fontSize: 'clamp(30px, 10vw, 54px)', fontFamily: "'Russo One', sans-serif", color: '#a3e635', WebkitTextStroke: '2px #14532d', textShadow: '0 4px 0 #14532d, 0 0 20px #65a30d', translateX: '-50%' }}
+        initial={{ opacity: 0, scale: 0.3, rotate: -8 }}
+        animate={{ opacity: [0, 0, 1, 1, 0], scale: [0.3, 0.3, 1.25, 1, 1], rotate: [-8, -8, 3, 0, 0] }}
+        transition={{ duration: T, times: [0, at(1.1), at(1.3), at(1.5), 1] }}
+      >
+        КАВАБАНГА!
+      </motion.span>
+    </At>
   );
 }

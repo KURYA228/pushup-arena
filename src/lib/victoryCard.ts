@@ -1,6 +1,7 @@
 import type { BossDef } from '../data/bosses';
 import { BOSSES } from '../data/bosses';
 import { fightDuration, plural, type StageRecord } from './stats';
+import { bossArtUrl } from './bossArt';
 
 /**
  * The victory card: a picture of the win, drawn on a canvas so it can go out through the share
@@ -82,7 +83,8 @@ export async function renderVictoryCard(data: VictoryCardData): Promise<HTMLCanv
 
   // Artwork, fitted into the top of the card and dissolved into the background on every side,
   // the same way the fight screen does it — a hard-edged rectangle reads as a pasted photo.
-  const art = await loadImage(`${import.meta.env.BASE_URL}bosses/${boss.icon}`);
+  // As drawn, like everywhere off the fight screen.
+  const art = await loadImage(bossArtUrl(boss.icon, true));
   if (art) {
     const box = { x: 90, y: 60, w: 900, h: 820 };
     const scale = Math.min(box.w / art.naturalWidth, box.h / art.naturalHeight);

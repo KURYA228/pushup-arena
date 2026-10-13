@@ -57,7 +57,7 @@ export function RanksCard({ profile, level }: { profile: ProfileRecord; level: n
           <Tile
             onOpen={() => setOpen('league')}
             label="Лига недели"
-            icon={league.tier.icon}
+            icon={league.icon}
             name={league.name}
             color={league.tier.color}
             note={league.to != null ? `${weekReps} / ${league.to} отж.` : `${weekReps} отж.`}

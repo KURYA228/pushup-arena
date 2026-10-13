@@ -55,18 +55,27 @@ export interface LeagueTier {
   name: string;
   /** Push-ups in a week to enter it. */
   min: number;
+  /** The league's emblem, under `public/`. */
   icon: string;
+  /** Each division's own badge, III, II, I — the order of `division`. Мастер has none. */
+  divisionIcons?: [string, string, string];
   color: string;
 }
 
 /** Weekly push-ups. Mastery has no divisions; everything below it splits into III, II, I. */
+/** Art cut from the league sheet by scripts/slice-league-sheet.mjs. */
+const leagueArt = (id: string): Pick<LeagueTier, 'icon' | 'divisionIcons'> => ({
+  icon: `leagues/${id}.png`,
+  divisionIcons: [`leagues/${id}-iii.png`, `leagues/${id}-ii.png`, `leagues/${id}-i.png`],
+});
+
 export const LEAGUES: LeagueTier[] = [
-  { name: 'Бронза', min: 0, icon: '🥉', color: '#c1783c' },
-  { name: 'Серебро', min: 100, icon: '🥈', color: '#c3ccd8' },
-  { name: 'Золото', min: 250, icon: '🥇', color: '#f5c542' },
-  { name: 'Платина', min: 500, icon: '💠', color: '#5eead4' },
-  { name: 'Алмаз', min: 800, icon: '💎', color: '#60a5fa' },
-  { name: 'Мастер', min: 1200, icon: '🔥', color: '#ef4444' },
+  { name: 'Бронза', min: 0, ...leagueArt('bronze'), color: '#c1783c' },
+  { name: 'Серебро', min: 100, ...leagueArt('silver'), color: '#c3ccd8' },
+  { name: 'Золото', min: 250, ...leagueArt('gold'), color: '#f5c542' },
+  { name: 'Платина', min: 500, ...leagueArt('platinum'), color: '#5eead4' },
+  { name: 'Алмаз', min: 800, ...leagueArt('diamond'), color: '#60a5fa' },
+  { name: 'Мастер', min: 1200, icon: 'leagues/master.png', color: '#a855f7' },
 ];
 
 const DIVISIONS = ['III', 'II', 'I'] as const;
@@ -77,6 +86,8 @@ export interface LeagueStanding {
   division: number | null;
   /** "Золото II", or just "Мастер". */
   name: string;
+  /** The division's own badge, or the league's emblem where there are no divisions. */
+  icon: string;
   /** Push-ups at which this division starts, and at which the next one does (null at the top). */
   from: number;
   to: number | null;
@@ -90,7 +101,7 @@ export function leagueFor(weekReps: number): LeagueStanding {
   for (let i = 0; i < LEAGUES.length; i += 1) if (reps >= LEAGUES[i].min) t = i;
   const tier = LEAGUES[t];
   const next = LEAGUES[t + 1];
-  if (!next) return { tier, division: null, name: tier.name, from: tier.min, to: null, step: t * 3 };
+  if (!next) return { tier, division: null, name: tier.name, icon: tier.icon, from: tier.min, to: null, step: t * 3 };
 
   // Thirds of the tier's span, rounded so the edges land on whole push-ups.
   const span = next.min - tier.min;
@@ -101,6 +112,7 @@ export function leagueFor(weekReps: number): LeagueStanding {
     tier,
     division: d,
     name: `${tier.name} ${DIVISIONS[d]}`,
+    icon: tier.divisionIcons?.[d] ?? tier.icon,
     from: edges[d],
     to: edges[d + 1],
     step: t * 3 + d,
@@ -158,7 +170,7 @@ export function rankUpsBetween(
   if (r1.minLevel > r0.minLevel) ups.push({ kind: 'level', name: r1.name, icon: r1.icon, color: r1.color });
   const l0 = leagueFor(before.weekReps);
   const l1 = leagueFor(after.weekReps);
-  if (l1.step > l0.step) ups.push({ kind: 'league', name: l1.name, icon: l1.tier.icon, color: l1.tier.color });
+  if (l1.step > l0.step) ups.push({ kind: 'league', name: l1.name, icon: l1.icon, color: l1.tier.color });
   const s0 = strengthFor(before.bestSet);
   const s1 = strengthFor(after.bestSet);
   if (s1.min > s0.min) ups.push({ kind: 'strength', name: s1.name, icon: s1.icon, color: s1.color });

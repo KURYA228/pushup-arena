@@ -122,6 +122,8 @@ const SAMPLES = {
   headshot: 'sfx/headshot.m4a',
   // The Minecraft damage "oof", for the Ender Dragon's reps.
   hurt: 'sfx/hurt.m4a',
+  // The turtles' shout as Shredder goes down.
+  cowabunga: 'sfx/cowabunga.m4a',
   // Lines a boss says as he walks out, one file each under sfx/lines/.
   lineKrabs: 'sfx/lines/krabs.m4a',
   lineEnder: 'sfx/lines/ender.m4a',
@@ -133,13 +135,14 @@ const SAMPLES = {
   lineGru: 'sfx/lines/gru.m4a',
   lineSkipper: 'sfx/lines/skipper.m4a',
   lineTsar: 'sfx/lines/tsar.m4a',
+  lineShredder: 'sfx/lines/shredder.m4a',
 } as const;
 type SampleName = keyof typeof SAMPLES;
 
 /** The ones a stage can name as its rep cue; the rest belong to a particular moment. */
 export type RepSample = Extract<SampleName, 'coins' | 'oink' | 'hurt'>;
 /** Every rep cue a stage can ask for: a recording, or one synthesised here. */
-export type RepCue = RepSample | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace';
+export type RepCue = RepSample | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace' | 'katana';
 /** A boss's spoken line, played once as he walks out — see `playBossEncounter`. */
 export type BossLine = Extract<SampleName, `line${string}`>;
 
@@ -627,6 +630,53 @@ function joyBuzzer(c: AudioContext, peak: number) {
   hit(c, 4200 * k, 3, 0.03, dur - 0.04, peak * 0.3);
 }
 
+/** Share of Shredder's blows that are both blades. */
+export const KATANA_DOUBLE = 0.33;
+/** How far the second blade trails the first, in seconds — the picture keeps to it too. */
+export const KATANA_GAP_SEC = 0.08;
+
+/**
+ * Shredder's katanas, the way a sword sounds in the films: not a clang but a "shiing".
+ *
+ * Three layers. The swing is a thin whistle of the edge through the air — a tight band of noise
+ * that leaps up in pitch and falls away again as the blade passes, with a broader whoosh under
+ * it. Then, where it bites, a hiss of steel scraping steel: bright noise, a tenth of a second.
+ * And over that the ring — high and thin, three to nine kilohertz, nothing a bell would use —
+ * each partial a pair of tones a few hertz apart, so they beat against each other and the ring
+ * shimmers instead of standing still. That shimmer is most of what says "blade".
+ *
+ * About one blow in three is both swords, the second a hair behind and a little lower, so a set
+ * sounds like a swordsman and not a metronome. Re-rolled every call.
+ */
+function katanaSlash(c: AudioContext, peak: number, double?: boolean) {
+  // Picked by the caller when the screen draws the blades too, so two cuts sound as two.
+  const blades = (double ?? Math.random() < KATANA_DOUBLE) ? 2 : 1;
+  for (let b = 0; b < blades; b += 1) {
+    const k = (0.94 + Math.random() * 0.12) * (b ? 0.9 : 1);
+    const t = b * KATANA_GAP_SEC;
+    const p = peak * (b ? 0.7 : 1);
+    // The swing: the edge whistling up and away, and the air it moves.
+    swish(c, 2600 * k, 7400 * k, t, 0.06, 9, p * 0.45);
+    swish(c, 7400 * k, 3000 * k, t + 0.055, 0.07, 9, p * 0.35);
+    swish(c, 1200 * k, 3800 * k, t, 0.1, 1.5, p * 0.22);
+    const at = t + 0.1;
+    // The bite: a hard tick, then steel scraping steel.
+    hit(c, 6400 * k, 1.5, at, 0.015, p * 0.7);
+    swish(c, 9000 * k, 5200 * k, at, 0.12, 2.2, p * 0.4);
+    // The ring: high partials, each a beating pair, dying away over a third of a second.
+    for (const [hz, gain, dur] of [
+      [3150, 0.16, 0.34],
+      [4720, 0.13, 0.28],
+      [6380, 0.1, 0.22],
+      [8900, 0.06, 0.16],
+    ] as const) {
+      const f = hz * k;
+      sweep(c, f, f * 0.998, at, dur, p * gain, 'sine');
+      sweep(c, f + 7, (f + 7) * 0.998, at, dur, p * gain * 0.8, 'sine');
+    }
+  }
+}
+
 /**
  * Tsar Vladimir's bogatyrs at work: a heavy swing, then a mace landing on an iron shield — a dull
  * thud for the weight, a bright clang for the metal, and a short ring of bell partials on top,
@@ -659,7 +709,8 @@ function maceClang(c: AudioContext, peak: number) {
 }
 
 /** A counted rep. Crits get their own cue so you can hear one without looking at the screen. */
-export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepCue) {
+/** `double`: Shredder's katana — both blades this time; left out, it's rolled here. */
+export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepCue, double?: boolean) {
   if (crit) {
     playCrit(prefs);
     return;
@@ -678,6 +729,7 @@ export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepCue) {
       else if (sound === 'honk') noseHonk(c, 0.3);
       else if (sound === 'buzzer') joyBuzzer(c, 0.3);
       else if (sound === 'mace') maceClang(c, 0.3);
+      else if (sound === 'katana') katanaSlash(c, 0.3, double);
       else if (sound) {
         loadSample(c, sound);
         if (!playSample(c, sound, 0.5)) {
@@ -820,6 +872,162 @@ export function playXpOrbs(prefs: FeedbackPrefs) {
     const f = 1400 + Math.random() * 900;
     sweep(c, f, f * 1.08, i * 0.07, 0.08, 0.07, 'sine');
   }
+}
+
+/* ------------------------------- Финал ------------------------------- */
+
+/** One XP orb picked up: a single bright ping at a random pitch, as the game does it. */
+export function playOrb(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const f = 1300 + Math.random() * 1100;
+  sweep(c, f, f * 1.06, 0, 0.09, 0.06, 'sine');
+  sweep(c, f * 2, f * 2.1, 0, 0.05, 0.015, 'sine');
+}
+
+/** The XP bar rolling over to the next level: a short bright bell pair. */
+export function playXpLevel(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  bell(c, 1046.5, 0, 0.45, 0.1);
+  bell(c, 1568, 0.07, 0.6, 0.08);
+}
+
+/** A slab of stone landing: a dull thump with a gritty edge. */
+export function playSlabLand(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      sweep(c, 120, 45, 0, 0.35, 0.45, 'sine');
+      hit(c, 600, 0.6, 0, 0.18, 0.3);
+      hit(c, 2400, 1.2, 0, 0.05, 0.12);
+    }
+  }
+  buzz(prefs, 50);
+}
+
+/** A heavy bare foot on stone. Low and short — in the silence it carries on its own. */
+export function playFootstep(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      const k = 0.9 + Math.random() * 0.2;
+      sweep(c, 95 * k, 40, 0, 0.22, 0.5, 'sine');
+      hit(c, 380 * k, 0.8, 0, 0.08, 0.2);
+    }
+  }
+  buzz(prefs, 25);
+}
+
+/**
+ * The slab snapping over a knee: the crack that splits it, the thud of the knee under it, and
+ * the grit and chips of the two halves coming apart.
+ */
+export function playSlabBreak(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      hit(c, 2800, 0.9, 0, 0.06, 0.6);
+      hit(c, 6200, 1.6, 0, 0.03, 0.3);
+      sweep(c, 160, 38, 0, 0.45, 0.6, 'sine');
+      hit(c, 450, 0.5, 0.01, 0.35, 0.4);
+      for (let i = 0; i < 9; i += 1) hit(c, 1200 + Math.random() * 3800, 3, 0.06 + i * 0.035 + Math.random() * 0.02, 0.025, 0.14);
+      // The halves hitting the floor.
+      sweep(c, 110, 50, 0.75, 0.2, 0.3, 'sine');
+      hit(c, 900, 0.8, 0.75, 0.1, 0.18);
+      sweep(c, 100, 45, 0.92, 0.2, 0.25, 'sine');
+      hit(c, 800, 0.8, 0.92, 0.1, 0.15);
+    }
+  }
+  buzz(prefs, [80, 40, 160]);
+}
+
+/* ------------------------------ Шреддер ------------------------------ */
+
+/** A Foot ninja vanishing in smoke: a puff of air and a quick bamboo-flute flick. */
+export function playNinjaVanish(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 1800, 400, 0, 0.3, 0.8, 0.22);
+  sweep(c, 1400, 2600, 0.02, 0.09, 0.05, 'sine');
+  hit(c, 5200, 2, 0.02, 0.02, 0.08);
+}
+
+/** The pot coming to the boil and Shredder supping it: bubbles, then a long, rude slurp. */
+export function playSoupDinner(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 9; i += 1) {
+    const f = 260 + Math.random() * 420;
+    sweep(c, f, f * 1.9, 0.05 + i * 0.07 + Math.random() * 0.03, 0.06, 0.12, 'sine');
+  }
+  swish(c, 700, 2400, 0.8, 0.55, 3, 0.2);
+  sweep(c, 180, 120, 1.4, 0.18, 0.25, 'sine');
+}
+
+/** The pot taken off the heat: a hiss of steam dying away. */
+export function playSoupCool(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 6000, 2200, 0, 0.7, 0.7, 0.16);
+}
+
+/** Bebop's and Rocksteady's guns: three quick laser shots, each a bright chirp falling away. */
+export function playLaserVolley(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 3; i += 1) {
+    const at = i * 0.12;
+    sweep(c, 2400, 380, at, 0.14, 0.14, 'square');
+    sweep(c, 1600, 260, at, 0.14, 0.12, 'sawtooth');
+    hit(c, 3000, 1, at, 0.03, 0.12);
+  }
+}
+
+/** Stockman's mousers: a scuttle of tiny feet and the snap of their jaws. */
+export function playMousers(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 22; i += 1) hit(c, 3200 + Math.random() * 2400, 6, i * 0.055 + Math.random() * 0.02, 0.015, 0.1);
+  for (let i = 0; i < 5; i += 1) {
+    const at = 0.15 + i * 0.28;
+    hit(c, 1800, 3, at, 0.02, 0.22);
+    sweep(c, 900, 500, at, 0.05, 0.1, 'square');
+  }
+}
+
+/** Shredder going down: his helmet hitting the floor, then the turtles' "Cowabunga!". */
+export function playCowabunga(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      // The helmet: a heavy clang and a couple of rattling bounces.
+      for (const [at, g] of [
+        [0.35, 0.4],
+        [0.62, 0.22],
+        [0.8, 0.12],
+      ] as const) {
+        hit(c, 2400, 1.5, at, 0.04, g);
+        sweep(c, 880, 860, at, 0.25, g * 0.5, 'sine');
+        sweep(c, 1430, 1400, at, 0.18, g * 0.3, 'sine');
+      }
+      // The shout, recorded, as the turtles come running — fetched while his stage is up (see
+      // preloadBossCues). The browser's voice says it only if the file never made it.
+      loadSample(c, 'cowabunga');
+      if (!playSample(c, 'cowabunga', 0.9, { delay: 1.1, exact: true })) {
+        [392, 494, 587, 784].forEach((f, i) => sweep(c, f, f * 1.01, 1.15 + i * 0.09, 0.22, 0.12, 'sawtooth'));
+        window.setTimeout(() => speak('Cowabunga!', 1.05, 1.3), 1150);
+      }
+    } else window.setTimeout(() => speak('Cowabunga!', 1.05, 1.3), 1150);
+  }
+  buzz(prefs, [60, 200, 40, 120, 40]);
 }
 
 /** A blocky explosion: a deep boom and the crackle of debris. */
@@ -1203,17 +1411,6 @@ export function playSlipper(prefs: FeedbackPrefs) {
   sweep(c, 210, 80, at, 0.12, 0.45, 'sine');
 }
 
-/** A karate block: a sharp clap of a palm meeting the blow, with a dull thud behind it. */
-export function playKarateBlock(prefs: FeedbackPrefs) {
-  if (!prefs.sound) return;
-  const c = audioContext();
-  if (!c) return;
-  hit(c, 2800, 0.9, 0.02, 0.04, 0.42);
-  hit(c, 6200, 2, 0.02, 0.02, 0.2);
-  sweep(c, 160, 60, 0.02, 0.14, 0.4, 'sine');
-  swish(c, 3000, 800, 0, 0.08, 1.5, 0.12);
-}
-
 /** Seeing stars: a springy "boing", then little twinkles going round. */
 export function playDizzy(prefs: FeedbackPrefs) {
   if (!prefs.sound) return;
@@ -1263,6 +1460,31 @@ export function playShieldClank(prefs: FeedbackPrefs) {
   hit(c, 4400 * k, 3, 0.03, 0.02, 0.16);
   sweep(c, 2300 * k, 2250 * k, 0.03, 0.16, 0.11, 'sine');
   sweep(c, 3480 * k, 3420 * k, 0.03, 0.1, 0.06, 'sine');
+}
+
+/**
+ * A crit stopped dead on a steel shield: the thud of the blow taking the shield back, a hard
+ * clang off its face and a short, bright ring — heavier and lower than Skipper's ice.
+ */
+export function playShieldBlock(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      const k = 0.94 + Math.random() * 0.12;
+      const at = 0.24;
+      sweep(c, 170 * k, 60, at, 0.18, 0.5, 'sine');
+      hit(c, 900 * k, 1.1, at, 0.06, 0.4);
+      hit(c, 3800 * k, 1.6, at, 0.03, 0.35);
+      for (const [r, g, d] of [
+        [1, 0.16, 0.3],
+        [2.76, 0.1, 0.22],
+        [5.4, 0.05, 0.14],
+      ] as const) {
+        sweep(c, 620 * k * r, 620 * k * r * 0.996, at, d, g, 'sine');
+      }
+    }
+  }
+  buzz(prefs, [10, 230, 40]);
 }
 
 /** A frozen rep: the ice holding Gru takes a crack — a sharp, glassy split and a creak under it. */
@@ -1378,11 +1600,12 @@ export function bossLineLevel(): number | null {
  * Starts fetching what a boss's entrance needs — the "Boss Fight" call and his line — ahead of
  * time, so they're in memory by the time he walks out. Safe to call as often as you like.
  */
-export function preloadBossCues(line?: BossLine) {
+export function preloadBossCues(line?: BossLine, extra?: SampleName) {
   const c = ctx;
   if (!c) return;
   loadSample(c, 'bossfight');
   if (line) loadSample(c, line);
+  if (extra) loadSample(c, extra);
 }
 
 /** When a boss's own line starts: after the "Boss" call has had its say. */

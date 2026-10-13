@@ -105,7 +105,9 @@ export function BossBriefing({ boss, index, onClose }: { boss: BossDef; index: n
         <h2 className="mt-1 text-2xl font-black text-arena-text">{boss.name}</h2>
         <p className="text-xs text-arena-text-dim">{boss.title}</p>
         <p className="mt-1 text-[11px] text-arena-text-dim">
-          Ждёт в конце этапа, после: {boss.minions.map((m) => m.name).join(', ')}
+          {boss.minions.length
+            ? `Ждёт в конце этапа, после: ${boss.minions.map((m) => m.name).join(', ')}`
+            : 'Без подчинённых — весь этап один на один'}
         </p>
 
         <p className="mt-4 text-left text-[11px] font-bold uppercase tracking-wider text-arena-text-dim">

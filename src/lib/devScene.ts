@@ -1,7 +1,7 @@
 import type { SceneKind } from '../components/AbilityScene';
 
-/** What the dev panel can ask the fight screen to play: any ability scene, or the boss's entrance. */
-export type DevScene = SceneKind | 'boss-intro';
+/** What the dev panel can ask the fight screen to play: any ability scene, the boss's entrance, or the finale. */
+export type DevScene = SceneKind | 'boss-intro' | 'finale';
 
 export const DEV_SCENE_EVENT = 'arena:dev-scene';
 

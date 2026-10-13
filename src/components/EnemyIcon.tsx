@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { BossAvatar } from './BossAvatar';
+import { bossArtUrl } from '../lib/bossArt';
 
 /**
  * Where the picture stops being a picture.
@@ -72,6 +73,7 @@ export function EnemyIcon({
   shadowed = false,
   frame: fixedFrame,
   light = false,
+  original = false,
 }: {
   file: string;
   color: string;
@@ -116,6 +118,8 @@ export function EnemyIcon({
   frame?: { w: number; h: number };
   /** Dark artwork: brightened a little and given a lighter vignette. */
   light?: boolean;
+  /** Shown as it was drawn, before scripts/brighten-boss-art.mjs lifted it for the fight screen. */
+  original?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   /** The picture's own proportions, once the browser has them. */
@@ -126,9 +130,10 @@ export function EnemyIcon({
     return <BossAvatar color={color} tier={tier} size={size} className={className} />;
   }
 
-  // A PNG is assumed to be a real cut-out with its own transparency and is left alone. A JPEG
-  // is a rectangular photograph, so on the fight screen its edge has to be dissolved instead.
-  const cutout = /\.png$/i.test(file);
+  // A PNG or WebP is assumed to be a real cut-out with its own transparency and is left alone.
+  // A JPEG is a rectangular photograph, so on the fight screen its edge has to be dissolved
+  // instead.
+  const cutout = /\.(png|webp)$/i.test(file);
 
   // On the fight screen the artwork is fitted to its own shape instead of being cropped to
   // fill the slot. Cropping only works while every picture happens to be roughly square: a
@@ -147,7 +152,7 @@ export function EnemyIcon({
 
   const img = (
     <img
-      src={`${import.meta.env.BASE_URL}bosses/${file}`}
+      src={bossArtUrl(file, original)}
       alt=""
       aria-hidden="true"
       width={w}

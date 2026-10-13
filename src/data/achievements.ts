@@ -9,6 +9,12 @@ export interface AchievementDef {
   check: (p: ProfileRecord) => boolean;
 }
 
+/**
+ * The medal, under `public/` — cut from the achievements sheet by
+ * scripts/slice-achievement-sheet.mjs, one file per id. The emoji stays as the dev panel's label.
+ */
+export const achievementIcon = (a: AchievementDef) => `achievements/${a.id}.png`;
+
 export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'first_blood', title: 'Первая кровь', description: 'Сделай первое отжимание', emoji: '🩸', check: (p) => p.totalPushups >= 1 },
   { id: 'century', title: 'Сотня', description: '100 отжиманий всего', emoji: '💯', check: (p) => p.totalPushups >= 100 },

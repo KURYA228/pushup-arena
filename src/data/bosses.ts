@@ -16,9 +16,9 @@ export interface MinionDef {
 }
 
 /** Named rep cues a stage can ask for instead of the default. */
-export type HitSound = 'coins' | 'oink' | 'hurt' | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace';
+export type HitSound = 'coins' | 'oink' | 'hurt' | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace' | 'katana';
 /** Recorded lines a boss can say as he walks out (files under `public/sfx/lines/`). */
-export type BossLine = 'lineKrabs' | 'linePig' | 'lineGru' | 'lineSkipper' | 'lineNicole' | 'lineRobin' | 'lineFreddy' | 'lineJoker' | 'lineEnder' | 'lineTsar';
+export type BossLine = 'lineKrabs' | 'linePig' | 'lineGru' | 'lineSkipper' | 'lineNicole' | 'lineRobin' | 'lineFreddy' | 'lineJoker' | 'lineEnder' | 'lineTsar' | 'lineShredder';
 
 export interface BossDef {
   /**
@@ -93,7 +93,8 @@ interface RawBoss {
   hitSound?: HitSound;
   line?: BossLine;
   abilities: BossAbility[];
-  minions: [string, string, string];
+  /** Three, or none at all for a stage that is the boss alone — the whole budget is his. */
+  minions: [string, string, string] | [];
   artLight?: boolean;
 }
 
@@ -282,19 +283,28 @@ const RAW: RawBoss[] = [
     artLight: true,
   },
   {
+    // The id is from when this stage was Громовержец: saves store victories by id, so it stays.
     id: 'stormborn',
-    name: 'Громовержец',
-    nameGenitive: 'Громовержца',
-    title: 'Голос неба',
-    phrase: 'Гром гремит, когда падаешь ты. Не наоборот.',
+    name: 'Шреддер',
+    nameGenitive: 'Шреддера',
+    title: 'Глава клана Фут',
+    phrase: 'Сегодня я буду ужинать супом из черепашек!',
     budget: 2700,
     baseDamage: 10,
     critChance: 0.22,
     critMultiplier: 2.8,
-    color: '#2563eb',
+    color: '#b91c1c',
     icon: '10-stormborn.jpg',
-    abilities: [{ kind: 'critImmune', value: 1 }, { kind: 'skipEvery', value: 5 }],
-    minions: ['Искра', 'Раскат', 'Шквал'],
+    // His twin katanas on every rep (synthesised, `katanaSlash` in src/lib/feedback.ts); his
+    // theme as he walks out, cut from a screen recording at a quiet spot eight seconds in.
+    hitSound: 'katana',
+    line: 'lineShredder',
+    abilities: [
+      { kind: 'critImmune', value: 1 },
+      { kind: 'skipEvery', value: 5 },
+      { kind: 'turtleSoup', value: 0.06 },
+    ],
+    minions: ['Бибоп', 'Рокстеди', 'Бакстер Стокман'],
   },
   {
     id: 'worldbreaker',
@@ -381,6 +391,33 @@ const RAW: RawBoss[] = [
     ],
     minions: ['Претендент', 'Наследник', 'Тень Апекса'],
   },
+  {
+    // The host from the intro, and the last word: he comes out after the finale has broken the
+    // «ЭТО КОНЕЦ?» slab over his knee. No minions — the whole stage is him, and it is the
+    // biggest budget in the arena by a distance. No crits get through, every stretch of his
+    // health has its own armour on top of the base one, and he won't go down at 1 HP until
+    // you finish him in one unbroken run. Nothing that heals over a pause, though: a fight this
+    // long takes more than one evening, and a boss who is whole again by morning can't be beaten.
+    id: 'kiryukha',
+    name: 'Кирюха',
+    nameGenitive: 'Кирюхи',
+    title: 'Хозяин арены',
+    phrase: 'Думал, это был конец? Я тебя сюда и привёл.',
+    budget: 6000,
+    baseDamage: 10,
+    critChance: 0.3,
+    critMultiplier: 3.5,
+    color: '#f59e0b',
+    icon: '16-kiryukha.webp',
+    abilities: [
+      { kind: 'armor', value: 0.25 },
+      { kind: 'critImmune', value: 1 },
+      { kind: 'bulwark', value: 0.3 },
+      { kind: 'enrage', value: 0.4 },
+      { kind: 'falseDeath', value: 20 },
+    ],
+    minions: [],
+  },
 ];
 
 export const BOSSES: BossDef[] = RAW.map((r, index) => ({
@@ -389,7 +426,7 @@ export const BOSSES: BossDef[] = RAW.map((r, index) => ({
   nameGenitive: r.nameGenitive,
   title: r.title,
   phrase: r.phrase,
-  hp: Math.round(r.budget * BOSS_SHARE),
+  hp: Math.round(r.budget * (r.minions.length ? BOSS_SHARE : 1)),
   baseDamage: r.baseDamage,
   critChance: r.critChance,
   critMultiplier: r.critMultiplier,
@@ -419,9 +456,14 @@ export interface Encounter {
   abilities: BossAbility[];
 }
 
+/** Where a stage opens: on its first minion, or straight on the boss when he has none. */
+export function firstStep(boss: BossDef): number {
+  return boss.minions.length ? 0 : BOSS_STEP;
+}
+
 /** Who you are fighting at a given point in a stage. */
 export function encounterAt(boss: BossDef, step: number): Encounter {
-  if (step >= BOSS_STEP) {
+  if (step >= BOSS_STEP || !boss.minions.length) {
     return { name: boss.name, hp: boss.hp, icon: boss.icon, isBoss: true, abilities: boss.abilities };
   }
   const minion = boss.minions[Math.max(0, Math.min(step, boss.minions.length - 1))];

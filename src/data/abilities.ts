@@ -35,7 +35,8 @@ export type AbilityKind =
   | 'teamwork'
   | 'endCrystals'
   | 'tribute'
-  | 'treasury';
+  | 'treasury'
+  | 'turtleSoup';
 
 /**
  * The one pause the whole game measures by: five seconds or more ends a set. Every rule that
@@ -57,6 +58,16 @@ export const CRYSTAL_REPS = 15;
 export const CRYSTAL_SHIELD = 0.5;
 /** "Казна": how much of a blow gets through while the bogatyrs are covering the tsar. */
 export const TREASURY_GUARD = 0.5;
+/**
+ * "Карта-джокер": the chance a rep crits against the Joker himself, in place of his stage's own.
+ * Every crit heals him, and at the stage's usual 19% that came round often enough to make him
+ * the hardest wall in the first half of the arena. His minions keep the usual chance.
+ */
+export const JOKER_CRIT_CHANCE = 0.07;
+/** "Суп из черепашек": the pause on which the pot boils, counting from cold. */
+export const SOUP_BOILS_AFTER = 3;
+/** "Суп из черепашек": reps in one set without a pause that take the pot off the heat. */
+export const SOUP_COOL_REPS = 10;
 /** "Краденое яйцо": every this-many reps the pig steals an egg instead of taking the blow. */
 export const PIGGY_EVERY = 3;
 
@@ -148,7 +159,8 @@ export const ABILITY_INFO: Record<
   },
   jokerCard: {
     name: 'Карта-джокер',
-    describe: (v) => `твой крит по нему не бьёт, а лечит его на ${Math.round(v * 100)}% от урона крита`,
+    describe: (v) =>
+      `криты по нему выпадают реже (${Math.round(JOKER_CRIT_CHANCE * 100)}%), но не бьют, а лечат его на ${Math.round(v * 100)}% от урона крита`,
   },
   teamwork: {
     name: 'Командная работа',
@@ -162,6 +174,11 @@ export const ABILITY_INFO: Record<
   tribute: {
     name: 'Дань',
     describe: (v) => `каждый ${v}-й повтор подхода Антипка уносит в казну — без урона`,
+  },
+  turtleSoup: {
+    name: 'Суп из черепашек',
+    describe: (v) =>
+      `каждая пауза дольше ${SET_BREAK_MS / 1000} секунд подогревает котёл; на ${SOUP_BOILS_AFTER}-й суп готов — он ужинает и лечится на ${Math.round(v * 100)}% HP. ${SOUP_COOL_REPS} повторов без паузы остужают котёл`,
   },
   treasury: {
     name: 'Казна',
@@ -200,6 +217,7 @@ export const ABILITY_TIPS: Record<AbilityKind, { icon: string; tip: string }> = 
   teamwork: { icon: '🤝', tip: 'Подходы минимум по 5 — короче не засчитаются.' },
   endCrystals: { icon: '💎', tip: 'Подходы по 15 без паузы ломают кристаллы — потом урон полный.' },
   tribute: { icon: '👑', tip: 'Каждый седьмой повтор подхода уходит в казну — закладывай лишние.' },
+  turtleSoup: { icon: '🍲', tip: `Не давай котлу закипеть: подход в ${SOUP_COOL_REPS} повторов без паузы остужает его.` },
   treasury: { icon: '💰', tip: 'После половины HP богатыри прикроют его на 10 повторов — просто дожимай.' },
 };
 export const abilityName = (a: BossAbility) => ABILITY_INFO[a.kind].name;

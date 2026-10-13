@@ -12,6 +12,7 @@ import {
   BOSSES,
   BOSS_STEP,
   encounterAt,
+  firstStep,
   getBossBonusXp,
   getMinionBonusXp,
 } from '../data/bosses';
@@ -52,13 +53,26 @@ function defaultProfile(): ProfileRecord {
  */
 function migrate(p: ProfileRecord): ProfileRecord {
   const hasStage = typeof p.stageStep === 'number' && typeof p.enemyHp === 'number';
-  if (hasStage && p.fight) return p;
+  if (hasStage && p.fight) return openNewStage(p);
 
   const index = Math.min(p.currentBossIndex ?? 0, BOSSES.length - 1);
   const boss = BOSSES[index];
   const stageStep = hasStage ? p.stageStep : BOSS_STEP;
   const enemyHp = hasStage ? p.enemyHp : Math.min(p.bossHp ?? boss.hp, boss.hp);
   return { ...p, stageStep, enemyHp, fight: p.fight ?? freshFight(enemyHp) };
+}
+
+/**
+ * A save that cleared what used to be the last stage stays parked on that boss at 0 HP — there
+ * was nowhere further to go. Once a stage is added after it, the run moves on to the new one.
+ */
+function openNewStage(p: ProfileRecord): ProfileRecord {
+  const index = p.currentBossIndex ?? 0;
+  if (p.replay || index >= BOSSES.length - 1 || !p.bossesDefeated.includes(BOSSES[index].id)) return p;
+  const next = BOSSES[index + 1];
+  const step = firstStep(next);
+  const hp = encounterAt(next, step).hp;
+  return { ...p, currentBossIndex: index + 1, stageStep: step, enemyHp: hp, fight: freshFight(hp) };
 }
 
 async function ensureProfile(): Promise<ProfileRecord> {
@@ -437,7 +451,8 @@ export function useProfile() {
       const p = await ensureProfile();
       const boss = BOSSES[bossIndex];
       if (!boss || p.replay || !p.bossesDefeated.includes(boss.id)) return false;
-      const hp = encounterAt(boss, 0).hp;
+      const step = firstStep(boss);
+      const hp = encounterAt(boss, step).hp;
       await db.profile.put({
         ...p,
         replay: {
@@ -446,7 +461,7 @@ export function useProfile() {
           returnTo: { currentBossIndex: p.currentBossIndex, stageStep: p.stageStep, enemyHp: p.enemyHp, fight: p.fight },
         },
         currentBossIndex: bossIndex,
-        stageStep: 0,
+        stageStep: step,
         enemyHp: hp,
         fight: freshFight(hp),
       });

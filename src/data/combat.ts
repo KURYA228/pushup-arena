@@ -4,9 +4,12 @@ import {
   END_CRYSTALS,
   FREEZE_PAUSE_MS,
   HALF_HP,
+  JOKER_CRIT_CHANCE,
   NO_STOP_MS,
   PIGGY_EVERY,
   SET_BREAK_MS,
+  SOUP_BOILS_AFTER,
+  SOUP_COOL_REPS,
   TREASURY_GUARD,
   abilityValue,
   critLands,
@@ -14,7 +17,7 @@ import {
   hasAbility,
   xpMultiplier,
 } from './abilities.ts';
-import { BOSSES, BOSS_STEP, encounterAt } from './bosses.ts';
+import { BOSSES, BOSS_STEP, encounterAt, firstStep } from './bosses.ts';
 import { NO_PERKS, type PlayerPerks } from './shop.ts';
 
 /**
@@ -73,6 +76,8 @@ export interface FightState {
   treasuryUsed?: boolean;
   /** Blows still softened by the bogatyrs the treasury paid for. */
   guardLeft?: number;
+  /** "Суп из черепашек": pauses the pot has had since it was last cold. */
+  soupHeat?: number;
 }
 
 export interface ArenaState {
@@ -112,7 +117,9 @@ export type AbilityEvent =
   | 'treasury' // The tsar opened the treasury and hired the bogatyrs.
   | 'fee-paid' // The last rep of Krabs' entry fee: the set is paid for, the rest land.
   | 'bulwark-broken' // HP fell through 60%: "Панцирь" no longer softens the blows.
-  | 'crit-blocked'; // The roll was a crit, and "Стальная воля" turned it into a plain blow.
+  | 'crit-blocked' // The roll was a crit, and "Стальная воля" turned it into a plain blow.
+  | 'soup' // Shredder's pot boiled on a pause: he ate, and healed.
+  | 'soup-cooled'; // A long enough set took the pot off the heat.
 
 export interface RepOutcome {
   next: ArenaState;
@@ -155,6 +162,7 @@ export function freshFight(enemyHp: number): FightState {
     crystalsBroken: 0,
     treasuryUsed: false,
     guardLeft: 0,
+    soupHeat: 0,
   };
 }
 
@@ -219,6 +227,7 @@ function startEncounter(state: ArenaState, bossIndex: number, step: number, carr
       crystalsBroken: 0,
       treasuryUsed: false,
       guardLeft: 0,
+      soupHeat: 0,
     },
   };
 }
@@ -295,6 +304,18 @@ export function resolveArenaRep(
       }
       fight.scream = { hp: enemyHp, reps: 0 };
     }
+    // "Суп из черепашек": every rest heats the pot, and the one it boils on, he eats.
+    if (enemy.isBoss && hasAbility(abilities, 'turtleSoup')) {
+      fight.soupHeat = (fight.soupHeat ?? 0) + 1;
+      if (fight.soupHeat >= SOUP_BOILS_AFTER) {
+        const max = fight.enemyMaxHp;
+        const after = Math.min(max, enemyHp + Math.max(1, Math.round(max * abilityValue(abilities, 'turtleSoup'))));
+        healed += after - enemyHp;
+        enemyHp = after;
+        fight.soupHeat = 0;
+        events.push('soup');
+      }
+    }
     fight.lastStandReps = 0;
   }
 
@@ -319,6 +340,17 @@ export function resolveArenaRep(
   fight.regenAt = now;
   fight.setReps += 1;
   fight.repsOnEnemy += 1;
+
+  // ...and a long enough set without a pause takes it off the heat.
+  if (
+    enemy.isBoss &&
+    hasAbility(abilities, 'turtleSoup') &&
+    fight.setReps === SOUP_COOL_REPS &&
+    (fight.soupHeat ?? 0) > 0
+  ) {
+    fight.soupHeat = 0;
+    events.push('soup-cooled');
+  }
 
   // --- does this rep land at all? --------------------------------------------------------
   let blocked: BlockedReason = null;
@@ -364,7 +396,8 @@ export function resolveArenaRep(
   let isCrit = false;
   let damage = 0;
   if (!blocked) {
-    const rolled = roll < boss.critChance + perks.critBonus;
+    const chance = enemy.isBoss && hasAbility(abilities, 'jokerCard') ? JOKER_CRIT_CHANCE : boss.critChance;
+    const rolled = roll < chance + perks.critBonus;
     isCrit = critLands(abilities, rolled);
     if (rolled && !isCrit && enemy.isBoss) events.push('crit-blocked');
     const hit = damageDealt(
@@ -512,17 +545,18 @@ export function resolveArenaRep(
       next = isLast
         ? { ...next, enemyHp: 0, stageStep: BOSS_STEP, bossesDefeated: defeated, fight }
         : {
-            ...startEncounter({ ...next, fight }, bossIndex + 1, 0, 0),
+            ...startEncounter({ ...next, fight }, bossIndex + 1, firstStep(BOSSES[bossIndex + 1]), 0),
             bossesDefeated: defeated,
             fight: { ...freshFight(0), lastRepAt: now, revivedIds: [] },
           };
       if (!isLast) {
         // startEncounter set the HP; freshFight above wiped it, so re-derive both together.
-        const hp = encounterAt(BOSSES[bossIndex + 1], 0).hp;
+        const step = firstStep(BOSSES[bossIndex + 1]);
+        const hp = encounterAt(BOSSES[bossIndex + 1], step).hp;
         next = {
           ...next,
           bossIndex: bossIndex + 1,
-          stageStep: 0,
+          stageStep: step,
           enemyHp: hp,
           fight: { ...freshFight(hp), lastRepAt: now },
         };
@@ -531,8 +565,9 @@ export function resolveArenaRep(
       // Beaten before — a replay walking the stages again. He goes down, the list of victories
       // doesn't change, and the run carries on to the next stage's first minion.
       bossRebeaten = true;
-      const hp = encounterAt(BOSSES[bossIndex + 1], 0).hp;
-      next = { ...next, bossIndex: bossIndex + 1, stageStep: 0, enemyHp: hp, fight: { ...freshFight(hp), lastRepAt: now } };
+      const step = firstStep(BOSSES[bossIndex + 1]);
+      const hp = encounterAt(BOSSES[bossIndex + 1], step).hp;
+      next = { ...next, bossIndex: bossIndex + 1, stageStep: step, enemyHp: hp, fight: { ...freshFight(hp), lastRepAt: now } };
     } else {
       // The last boss, beaten before: the arena has nowhere further to go.
       bossRebeaten = true;

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BOSSES, BOSS_STEP, encounterAt } from './bosses.ts';
-import { CRYSTAL_REPS, END_CRYSTALS, FREEZE_PAUSE_MS, NO_STOP_MS, SET_BREAK_MS } from './abilities.ts';
+import { CRYSTAL_REPS, END_CRYSTALS, FREEZE_PAUSE_MS, JOKER_CRIT_CHANCE, NO_STOP_MS, SET_BREAK_MS } from './abilities.ts';
 import { applyIdleRegen, freshFight, resolveArenaRep, type ArenaState } from './combat.ts';
 
 const indexOf = (id: string) => BOSSES.findIndex((b) => b.id === id);
@@ -279,6 +279,42 @@ test('Карта-джокер: крит по Джокеру лечит его', 
   assert.equal(joke.next.enemyHp, hurt.state.enemyHp + joke.healed);
 });
 
+test('Карта-джокер: по самому Джокеру криты выпадают реже, по его подчинённым — как обычно', () => {
+  // Бросок между пониженным шансом и обычным: по Джокеру это не крит, по подчинённому — крит.
+  const roll = (JOKER_CRIT_CHANCE + BOSSES[indexOf('voidhammer')].critChance) / 2;
+  const boss = resolveArenaRep(at('voidhammer', BOSS_STEP), 1_000_000, roll);
+  assert.equal(boss.blocked, null);
+  assert.equal(boss.isCrit, false);
+  const minion = resolveArenaRep(at('voidhammer', 0), 1_000_000, roll);
+  assert.equal(minion.isCrit, true);
+});
+
+test('Суп из черепашек: третья пауза — суп готов, Шреддер лечится', () => {
+  let run = reps(at('stormborn', BOSS_STEP), 20);
+  const heal = Math.round(run.state.fight.enemyMaxHp * 0.06);
+  // Две паузы только греют котёл.
+  for (let i = 0; i < 2; i += 1) {
+    run = reps(run.state, 3, 1000, run.endedAt + SET_BREAK_MS);
+    assert.equal(run.state.fight.soupHeat, i + 1);
+    assert.ok(!run.outcomes.some((o) => o.events.includes('soup')));
+  }
+  // Третья — ужин.
+  const before = run.state.enemyHp;
+  const dinner = resolveArenaRep(run.state, run.endedAt + SET_BREAK_MS, 1);
+  assert.ok(dinner.events.includes('soup'));
+  assert.equal(dinner.healed, heal);
+  assert.equal(dinner.next.fight.soupHeat, 0);
+  assert.ok(dinner.next.enemyHp > before - 20);
+});
+
+test('Суп из черепашек: десять повторов без паузы остужают котёл', () => {
+  const warm = reps(reps(at('stormborn', BOSS_STEP), 3).state, 3, 1000, 2_000_000);
+  assert.equal(warm.state.fight.soupHeat, 1);
+  const cool = reps(warm.state, 10, 1000, warm.endedAt);
+  assert.ok(cool.outcomes.some((o) => o.events.includes('soup-cooled')));
+  assert.equal(cool.state.fight.soupHeat, 0);
+});
+
 test('Командная работа: короткий подход Робину не засчитывается', () => {
   const start = at('ironmaw', BOSS_STEP);
   const short = reps(start, 3);
@@ -341,6 +377,24 @@ test('Смерть босса переносит на первого подчи�
   assert.equal(win.next.enemyHp, encounterAt(BOSSES[indexOf('grunt') + 1], 0).hp);
   assert.equal(win.next.fight.setReps, 0);
   assert.equal(win.next.fight.damageThisSet, 0);
+});
+
+test('После Апекса — сразу Кирюха: без подчинённых, на полном HP', () => {
+  const run = repsUntil(at('absolute', BOSS_STEP), (o) => o.bossDefeated, 1000);
+  const win = run.outcomes[run.outcomes.length - 1];
+  assert.equal(win.next.bossIndex, indexOf('kiryukha'));
+  assert.equal(win.next.stageStep, BOSS_STEP);
+  assert.equal(win.next.enemyHp, BOSSES[indexOf('kiryukha')].hp);
+  assert.equal(encounterAt(BOSSES[indexOf('kiryukha')], BOSS_STEP).isBoss, true);
+});
+
+test('Кирюха — самый тяжёлый бой арены, тяжелее целого этапа Апекса', () => {
+  const repsFor = (id: string, step: number) =>
+    repsUntil(at(id, step), (o) => o.bossDefeated, 1000).outcomes.length;
+  const kiryukha = repsFor('kiryukha', BOSS_STEP);
+  for (const boss of BOSSES) {
+    if (boss.id !== 'kiryukha') assert.ok(repsFor(boss.id, 0) < kiryukha, boss.name);
+  }
 });
 
 test('Повторная победа над боссом ведёт на следующий этап и ничего не добавляет в победы', () => {

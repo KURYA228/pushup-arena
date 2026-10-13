@@ -47,7 +47,7 @@ const DEV_SCENES: { label: string; kind: DevScene }[] = [
   { label: 'Шкипер: отступ', kind: 'retreat' },
   { label: 'Шкипер: смерть', kind: 'penguins-wave' },
   { label: 'Николь: тапок', kind: 'slipper' },
-  { label: 'Николь: блок', kind: 'karate-block' },
+  { label: 'Блок крита: щит', kind: 'steel-shield' },
   { label: 'Николь: смерть', kind: 'dizzy' },
   { label: 'Фредди: скример', kind: 'scream' },
   { label: 'Скример сгорел', kind: 'scream-burned' },
@@ -68,6 +68,13 @@ const DEV_SCENES: { label: string; kind: DevScene }[] = [
   { label: 'Эндер: крипер', kind: 'creeper-boom' },
   { label: 'Эндер: рёв', kind: 'dragon-roar' },
   { label: 'Эндер: смерть', kind: 'ender-death' },
+  { label: 'Шреддер: ниндзя', kind: 'foot-ninja' },
+  { label: 'Шреддер: суп', kind: 'turtle-soup' },
+  { label: 'Шреддер: котёл остыл', kind: 'soup-cool' },
+  { label: 'Бибоп: лазеры', kind: 'laser-volley' },
+  { label: 'Стокман: мышеловы', kind: 'mousers' },
+  { label: 'Шреддер: смерть', kind: 'cowabunga' },
+  { label: 'Финал игры', kind: 'finale' },
 ];
 
 /**
@@ -267,7 +274,7 @@ export function DevPanel({
             <Action
               onClick={() => {
                 const l = leagueFor(weekRepsNow(profile, Date.now()));
-                announceRankUps([{ kind: 'league', name: l.name, icon: l.tier.icon, color: l.tier.color }]);
+                announceRankUps([{ kind: 'league', name: l.name, icon: l.icon, color: l.tier.color }]);
                 onClose();
               }}
             >

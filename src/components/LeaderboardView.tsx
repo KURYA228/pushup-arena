@@ -455,7 +455,7 @@ function LeagueStep({ reps }: { reps: number }) {
   const league = leagueFor(reps);
   return (
     <span className="whitespace-nowrap text-[10px] font-semibold" style={{ color: league.tier.color }}>
-      {league.tier.icon} {league.name}
+      <TierIcon icon={league.icon} /> {league.name}
     </span>
   );
 }
@@ -466,7 +466,7 @@ function RankIcons({ row }: { row: LeaderboardRow }) {
   const strength = strengthFor(row.bestSet);
   return (
     <span className="flex shrink-0 items-center gap-0.5 text-xs leading-none">
-      {row.weekReps > 0 && <span title={`Лига недели: ${league.name}`}>{league.tier.icon}</span>}
+      {row.weekReps > 0 && <TierIcon icon={league.icon} title={`Лига недели: ${league.name}`} />}
       {strength.min > 0 && <TierIcon icon={strength.icon} title={`Сила: ${strength.name}`} />}
     </span>
   );
