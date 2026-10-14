@@ -15,6 +15,7 @@ import {
   Settings2,
   SwitchCamera,
   Vibrate,
+  BellOff,
   Volume2,
   VolumeX,
 } from 'lucide-react';
@@ -397,6 +398,19 @@ export function CameraPanel({
                 checked={feedback.prefs.sound}
                 onChange={feedback.setSound}
               />
+              {feedback.prefs.sound && (
+                <Toggle
+                  icon={<BellOff size={14} />}
+                  label="Даже в беззвучном режиме"
+                  checked={feedback.prefs.loud}
+                  onChange={feedback.setLoud}
+                  note={
+                    feedback.canBeLoud
+                      ? 'может ставить на паузу музыку из других приложений'
+                      : 'не поддерживается этим браузером (нужен iOS 16.4+)'
+                  }
+                />
+              )}
               <Toggle
                 icon={<Vibrate size={14} />}
                 label="Вибрация"

@@ -89,6 +89,8 @@ import {
   playRushEnd,
   saveFeedbackPrefs,
   vibrationSupported,
+  applyAudioSession,
+  audioSessionSupported,
   type FeedbackPrefs,
 } from '../lib/feedback';
 
@@ -99,6 +101,11 @@ export function useFeedback() {
   useEffect(() => {
     installAudioUnlock();
   }, []);
+
+  // Set before the first sound and again whenever the switch is flipped.
+  useEffect(() => {
+    applyAudioSession(prefs);
+  }, [prefs]);
 
   const update = useCallback((patch: Partial<FeedbackPrefs>) => {
     setPrefs((p) => {
@@ -113,7 +120,9 @@ export function useFeedback() {
       prefs,
       setSound: (on: boolean) => update({ sound: on }),
       setVibration: (on: boolean) => update({ vibration: on }),
+      setLoud: (on: boolean) => update({ loud: on }),
       canVibrate: vibrationSupported(),
+      canBeLoud: audioSessionSupported(),
       /** `sound` lets a stage ask for its own rep cue; left out, the ordinary beep plays. */
       rep: (crit = false, sound?: HitSound, double?: boolean) => playRep(prefs, crit, sound, double),
       bossDefeat: () => playBossDefeat(prefs),

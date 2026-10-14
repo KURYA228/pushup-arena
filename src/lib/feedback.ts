@@ -9,7 +9,8 @@
  * Caveats worth knowing:
  *  - `navigator.vibrate` is not implemented in Safari on iOS at all, so haptics are Android-only.
  *    Sound therefore has to carry the job on an iPhone.
- *  - iOS routes WebAudio through the ringer switch: on silent, the beeps are silent too.
+ *  - iOS routes WebAudio through the ringer switch: on silent, the beeps are silent too — unless
+ *    the player opts into `loud`, see `applyAudioSession`.
  *  - Browsers refuse to start an AudioContext outside a user gesture, hence `installAudioUnlock`.
  */
 
@@ -21,9 +22,36 @@ import { LAND_SEC } from './bossCut';
 export interface FeedbackPrefs {
   sound: boolean;
   vibration: boolean;
+  /** Play through the iPhone's silent switch. Off by default: it can pause the player's music. */
+  loud: boolean;
 }
 
-export const DEFAULT_FEEDBACK: FeedbackPrefs = { sound: true, vibration: true };
+export const DEFAULT_FEEDBACK: FeedbackPrefs = { sound: true, vibration: true, loud: false };
+
+type AudioSessionNavigator = Navigator & { audioSession?: { type: string } };
+
+/** Safari 16.4+ (iOS 16.4+) lets a page say what kind of sound it makes. */
+export function audioSessionSupported(): boolean {
+  return typeof navigator !== 'undefined' && Boolean((navigator as AudioSessionNavigator).audioSession);
+}
+
+/**
+ * The silent switch.
+ *
+ * By default iOS treats WebAudio like a ringtone ("auto" ≈ ambient), so on silent the gym goes
+ * quiet. Declaring the page's sound as "playback" — the category of a video or a music app — makes
+ * it play regardless of the switch. The price is that playback audio may pause or duck what's
+ * playing in another app, which is why it's the player's choice and not the default.
+ */
+export function applyAudioSession(prefs: FeedbackPrefs) {
+  const session = (navigator as AudioSessionNavigator).audioSession;
+  if (!session) return;
+  try {
+    session.type = prefs.loud ? 'playback' : 'auto';
+  } catch {
+    // An unknown type on some build — stay with the browser's default.
+  }
+}
 
 const PREF_KEY = 'arena.feedback';
 
