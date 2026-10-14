@@ -4,6 +4,8 @@ import './index.css'
 import App from './App.tsx'
 import { HandoffRelay } from './components/HandoffRelay.tsx'
 import { isHandoffRelay } from './lib/cloud.ts'
+import { hasSeenIntro } from './lib/intro.ts'
+import { isAuthReturn, isOldHome, newHomeUrl } from './lib/moved.ts'
 
 // In dev, tear down any service worker left over from a production build served on the same
 // origin. vite-plugin-pwa doesn't register one here, but a worker installed earlier by
@@ -56,7 +58,12 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 
 // The Safari sheet a Google sign-in from the iPhone home screen came back to: it only relays the
 // code to the installed app (see `watchHandoff` in lib/cloud.ts), it doesn't run the game.
-createRoot(document.getElementById('root')!).render(
+// The old GitHub address: someone with nothing on this device goes straight to the new one.
+// Players who have progress here get a banner instead (MovedBanner) — see lib/moved.ts.
+const movingOn = isOldHome() && !hasSeenIntro() && !isAuthReturn()
+if (movingOn) window.location.replace(newHomeUrl())
+
+if (!movingOn) createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {isHandoffRelay() ? <HandoffRelay /> : <App />}
   </StrictMode>,

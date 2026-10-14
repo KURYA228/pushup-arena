@@ -18,6 +18,7 @@ import { Intro, type IntroExit } from './components/Intro';
 import { nextTier } from './data/abilities';
 import { SyncGate } from './components/SyncGate';
 import { hasSeenIntro } from './lib/intro';
+import { MovedBanner } from './components/MovedBanner';
 import { useCloud } from './hooks/useCloud';
 import { DevPanel } from './components/DevPanel';
 import { onDevPanelOpen } from './lib/devGate';
@@ -121,6 +122,7 @@ function App() {
   if (cloud.configured && !cloud.session && !cloud.unreachable && !entered) {
     return (
       <div className="safe-top safe-x safe-bottom min-h-screen overflow-y-auto bg-arena-bg">
+        <MovedBanner signedIn={false} />
         <AuthView cloud={cloud} signInOnly={signInOnly} onSkip={() => setEntered(true)} />
       </div>
     );
@@ -131,6 +133,7 @@ function App() {
       <ToastStack toasts={toasts} />
       <RankUpOverlay current={rankUps.current} onDone={rankUps.next} onShow={feedback.rankUp} />
       <SyncGate cloud={cloud} />
+      <MovedBanner signedIn={Boolean(cloud.session)} />
       <main className="flex-1 overflow-y-auto">
         {/*
           Keyed by tab so the incoming screen fades up instead of appearing as a hard cut, which
