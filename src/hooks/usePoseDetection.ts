@@ -13,6 +13,7 @@ import {
   type PoseSample,
   type Strictness,
 } from '../lib/repDetector';
+import { openCamera, startVideo } from '../lib/camera';
 
 // Loaded lazily on first camera use so the ~1.5MB MediaPipe JS never ships in the main bundle
 // for people who only use manual counting.
@@ -28,6 +29,8 @@ function loadVisionModule(): Promise<VisionModule> {
 // version comes from the installed package (vite.config.ts): the JS and the WASM it loads have to
 // be the same release, and a hard-coded one had drifted two majors behind.
 const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${__MEDIAPIPE_VERSION__}/wasm`;
+/** The same files from a second CDN, for when the first is down or blocked on this network. */
+const WASM_MIRROR = `https://unpkg.com/@mediapipe/tasks-vision@${__MEDIAPIPE_VERSION__}/wasm`;
 
 /**
  * How long the first load (engine + model, ~15MB) may take before we call it failed. Generous —
@@ -41,6 +44,14 @@ const STALL_NUDGE_MS = 2500;
 const STALL_RESTART_MS = 6000;
 /** This many failed inferences in a row means the engine itself is broken, not one bad frame. */
 const MAX_FRAME_ERRORS = 20;
+/**
+ * Below this many frames a second the full model misses the bottom of a quick rep. Held for
+ * LOW_FPS_SECONDS in a row (past the first seconds, while everything warms up), the camera
+ * moves to the lite model on its own.
+ */
+const LOW_FPS = 12;
+const LOW_FPS_SECONDS = 3;
+const WARMUP_MS = 4000;
 
 /** `full` tracks limbs noticeably better under the foreshortening a push-up produces; `lite` is ~2x faster. */
 export type ModelQuality = 'lite' | 'full';
@@ -161,7 +172,15 @@ function getLandmarker(quality: ModelQuality): Promise<PoseLandmarkerT> {
   if (cached) return cached;
 
   const created = loadVisionModule().then(async ({ FilesetResolver, PoseLandmarker }) => {
-    const vision = await FilesetResolver.forVisionTasks(WASM_BASE);
+    // The engine from the main CDN, and from the mirror if that fails — a CDN that's down or
+    // blocked on this network shouldn't mean no camera.
+    try {
+      return await build(await FilesetResolver.forVisionTasks(WASM_BASE));
+    } catch {
+      return await build(await FilesetResolver.forVisionTasks(WASM_MIRROR));
+    }
+
+    async function build(vision: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>) {
     const options = {
       baseOptions: { modelAssetPath: MODEL_URLS[quality], delegate: 'GPU' as const },
       runningMode: 'VIDEO' as const,
@@ -186,6 +205,7 @@ function getLandmarker(quality: ModelQuality): Promise<PoseLandmarkerT> {
         ...options,
         baseOptions: { ...options.baseOptions, delegate: 'CPU' as const },
       });
+    }
     }
   });
 
@@ -293,6 +313,11 @@ export function usePoseDetection(onRep: () => void) {
   const [fps, setFps] = useState(0);
   const [aspect, setAspect] = useState(3 / 4);
   const [snapshot, setSnapshot] = useState<DetectorSnapshot>(() => detectorRef.current!.snapshot());
+  /** Something the camera did on its own that the player should know about, or null. */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** When tracking last began, and how many seconds in a row the frame rate has been too low. */
+  const trackingSinceRef = useRef(0);
+  const lowFpsRef = useRef(0);
 
   /** Until when the skeleton flashes bright green: the moment a rep has just counted. */
   const flashUntilRef = useRef(0);
@@ -359,15 +384,7 @@ export function usePoseDetection(onRep: () => void) {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
         throw Object.assign(new Error('no-camera-api'), { name: 'NoCameraApi' });
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: prefsRef.current.facing,
-          width: { ideal: 960 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 },
-        },
-        audio: false,
-      });
+      const stream = await openCamera(prefsRef.current.facing);
       if (!alive()) {
         stream.getTracks().forEach((t) => t.stop());
         return;
@@ -383,9 +400,13 @@ export function usePoseDetection(onRep: () => void) {
       const video = videoRef.current;
       if (!video) throw new Error('no-video-element');
       video.srcObject = stream;
-      await video.play();
+      await startVideo(video);
       if (!alive()) return;
       if (video.videoWidth && video.videoHeight) setAspect(video.videoWidth / video.videoHeight);
+      // The phone turned, or the camera settled on another size: the frame changes shape.
+      video.onresize = () => {
+        if (video.videoWidth && video.videoHeight) setAspect(video.videoWidth / video.videoHeight);
+      };
 
       setStatus('loading-model');
       const [lm, vision] = await Promise.all([getLandmarker(prefsRef.current.model), loadVisionModule()]);
@@ -400,6 +421,8 @@ export function usePoseDetection(onRep: () => void) {
       lastNewFrameAtRef.current = performance.now();
       frameErrorsRef.current = 0;
       fpsCounterRef.current = { frames: 0, since: performance.now() };
+      trackingSinceRef.current = performance.now();
+      lowFpsRef.current = 0;
       setStatus('tracking');
 
       const tick = () => {
@@ -461,9 +484,23 @@ export function usePoseDetection(onRep: () => void) {
           const c = fpsCounterRef.current;
           c.frames += 1;
           if (now - c.since >= 1000) {
-            setFps(Math.round((c.frames * 1000) / (now - c.since)));
+            const rate = Math.round((c.frames * 1000) / (now - c.since));
+            setFps(rate);
             c.frames = 0;
             c.since = now;
+            // A phone that can't keep up with the full model: the lite one, before reps go missing.
+            if (prefsRef.current.model === 'full' && now - trackingSinceRef.current > WARMUP_MS) {
+              lowFpsRef.current = rate < LOW_FPS ? lowFpsRef.current + 1 : 0;
+              if (lowFpsRef.current >= LOW_FPS_SECONDS) {
+                lowFpsRef.current = 0;
+                setNotice('Телефон не успевал за точной моделью — включили быструю. Вернуть можно в настройках камеры.');
+                setPrefs((p) => {
+                  const next: Prefs = { ...p, model: 'lite' };
+                  savePrefs(next);
+                  return next;
+                });
+              }
+            }
           }
         } catch {
           // A single bad frame must not kill the loop — rAF is already rescheduled above.
@@ -492,10 +529,17 @@ export function usePoseDetection(onRep: () => void) {
         message = 'Доступ к камере запрещён. Разреши камеру в настройках браузера и попробуй снова.';
       } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
         message = 'Подходящая камера не найдена на этом устройстве.';
-      } else if (err.name === 'NotReadableError') {
-        message = 'Камера занята другим приложением.';
-      } else if (String(err.message || '').toLowerCase().includes('fetch')) {
+      } else if (err.name === 'NotReadableError' || err.name === 'AbortError' || err.name === 'TrackStartError') {
+        message = 'Камера занята другим приложением — закрой его (видеозвонок, камера) и нажми «Повторить попытку».';
+      } else if (err.name === 'PlayFailed') {
+        message = 'Видео с камеры не запустилось. Нажми «Повторить попытку».';
+      } else if (err.name === 'SecurityError') {
+        message = 'Браузер запретил камеру на этой странице. Открой игру по ссылке https:// в Safari или Chrome.';
+      } else if (String(err.message || '').toLowerCase().includes('fetch') || err.name === 'TypeError') {
         message = 'Не удалось загрузить модель распознавания — нужен интернет при первом запуске камеры.';
+      } else {
+        // Something unforeseen: say so, with its code, so it can be told apart from the rest.
+        message = `Не удалось включить камеру (${err.name || err.message || 'неизвестная ошибка'}). Нажми «Повторить попытку».`;
       }
       teardown();
       setError(message);
@@ -611,6 +655,8 @@ export function usePoseDetection(onRep: () => void) {
     fps,
     aspect,
     snapshot,
+    notice,
+    dismissNotice: () => setNotice(null),
     mirrored: prefs.facing === 'user',
     facing: prefs.facing,
     model: prefs.model,

@@ -281,12 +281,22 @@ export function CameraPanel({
                 {pose.status === 'requesting-permission'
                   ? 'Запрашиваем доступ к камере…'
                   : pose.status === 'loading-model'
-                    ? 'Загружаем распознавание…'
+                    ? 'Загружаем распознавание… В первый раз — до минуты, дальше быстро.'
                     : pose.status === 'error'
                       ? pose.error
                       : (hint?.text ?? 'Считаю отжимания — каждый повтор бьёт по врагу')}
               </p>
 
+              {/* Something the camera changed on its own — said once, dismissable. */}
+              {pose.notice && pose.status === 'tracking' && (
+                <button
+                  type="button"
+                  onClick={pose.dismissNotice}
+                  className={clsx('rounded-lg bg-arena-amber/10 px-2 py-1 text-left text-[10px] leading-snug text-arena-amber', bigPreview && 'text-center')}
+                >
+                  {pose.notice} ✕
+                </button>
+              )}
               {pose.status === 'tracking' && (
                 <>
                   <p className={clsx('text-[10px] tabular-nums text-arena-text-dim', bigPreview && 'text-center')}>
