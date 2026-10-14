@@ -169,7 +169,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
               <li>
                 iPhone: Настройки → Приложения → Safari → Расширения (на старых iOS — Настройки →
                 Safari → Блокировщики контента). Выключи блокировщики или добавь в исключения
-                kurya228.github.io и supabase.co.
+                yandexcloud.net и supabase.co.
               </li>
               <li>Если стоит VPN, AdGuard DNS или NextDNS — выключи на время или добавь те же исключения.</li>
               <li>Не помогло — выключи Частный узел iCloud или переключись между Wi‑Fi и мобильным интернетом.</li>

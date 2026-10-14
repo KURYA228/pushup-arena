@@ -38,3 +38,18 @@ git -c user.name="deploy" -c user.email="deploy@local" commit -q -m "build $SHA"
 git push -qf "$REMOTE" gh-pages
 
 echo "→ Опубликовано из $SHA"
+
+# The same game, built for the domain root, to Yandex Object Storage: mobile operators in Russia
+# cut github.io. Skipped without the upload key — see README, «Игра на Yandex Cloud».
+cd "$ROOT"
+YC_BUCKET="${YC_BUCKET:-pushuplegends}"
+if grep -q '^YC_SECRET_ACCESS_KEY=.' .env.deploy.local 2>/dev/null; then
+  echo "→ Сборка для Yandex"
+  BASE_PATH=/ npx vite build >/dev/null
+  node scripts/upload-yandex.mjs "$YC_BUCKET"
+  echo "→ https://$YC_BUCKET.website.yandexcloud.net/"
+  # Leave dist/ as the GitHub build, like before.
+  npx vite build >/dev/null
+else
+  echo "→ Yandex пропущен: нет ключа в .env.deploy.local"
+fi

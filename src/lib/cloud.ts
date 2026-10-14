@@ -247,7 +247,7 @@ function translate(message: string): string {
   // stops the same request made from the page, so the player sees a site that "works" and a login
   // that doesn't. Say so, with the way out — README, «Нет связи с сервером».
   if (m.includes('failed to fetch') || m.includes('load failed') || m.includes('network')) {
-    return 'Нет связи с сервером. Если интернет есть — скорее всего, мешает блокировщик рекламы. iPhone: Настройки → Приложения → Safari → Расширения — выключи блокировщики или добавь в исключения kurya228.github.io и supabase.co. Ещё могут мешать VPN, AdGuard DNS, NextDNS и Частный узел iCloud. Потом закрой игру и открой заново.';
+    return 'Нет связи с сервером. Если интернет есть — скорее всего, мешает блокировщик рекламы. iPhone: Настройки → Приложения → Safari → Расширения — выключи блокировщики или добавь в исключения yandexcloud.net и supabase.co. Ещё могут мешать VPN, AdGuard DNS, NextDNS и Частный узел iCloud. Потом закрой игру и открой заново.';
   }
   if (m.includes('provider is not enabled') || m.includes('unsupported provider')) {
     return 'Вход через Google ещё не включён в настройках Supabase.';
