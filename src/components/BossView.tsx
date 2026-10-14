@@ -14,13 +14,18 @@ import { LaughGas } from './JokerFx';
 import { TitansSignal } from './RobinFx';
 import { BogatyrWall } from './Kyiv';
 import { ShredderAmbient, SoupPot } from './ShredderFx';
+import { ElixirBar, HealSpell, KingAmbient, KingEmote, KingPanic, MegaKnightRun } from './KingFx';
+import { GliderFlyby, GoblinAmbient, SpideyTeam } from './GoblinFx';
+import { DragonScroll, DumplingSnack, FireworkChair, FuriousRaid, TaiLungAmbient } from './TaiLungFx';
+import { AvengersAssist, DronePushups, PuppetStrings, RebootGlitch, UltronAmbient } from './UltronFx';
+import { ARROWS_LAND_AT, FLEX_BEATS, KiryukhaAmbient, LION_MEOW_AT, LION_ROAR_AT, RageAura, RomanEvents, SPARTAN_BEATS, StillStanding } from './KiryukhaFx';
 import { DragonWeak, EndCrystals, EndHitParticles, EnderAmbient, InfectionBadge } from './EnderFx';
 import { HpMarks, IceShield, RetreatPlaster, hpMarks } from './SkipperFx';
 import { BossIcon } from './BossIcon';
 import { BossTalk } from './BossTalk';
 import { BossBriefing, markBriefed, wasBriefed } from './BossBriefing';
 import { AbilityStamp, AbilityStatus, FrostOverlay } from './AbilityFx';
-import type { AbilityEvent } from '../data/combat';
+import { regenIntervalMs, type AbilityEvent } from '../data/combat';
 import { DEV_SCENE_EVENT, takeDevScene } from '../lib/devScene';
 import { BossIntro } from './BossIntro';
 import { BOSS_INTRO_SEC } from '../lib/bossCut';
@@ -37,7 +42,7 @@ import { useHint } from '../lib/hints';
 import { streakNotices } from '../lib/streak';
 import { KATANA_DOUBLE, bossLineLevel, preloadBossCues } from '../lib/feedback';
 import { HitFx, type Hit } from './HitFx';
-import { AbilityScene, SCENE_MS, STEEL_SHIELD_FADE_MS, type Scene, type SceneKind } from './AbilityScene';
+import { AbilityScene, GOBLIN_BOOM_SEC, LAUREL_AT_SEC, MJOLNIR_STRIKE_SEC, WUXI_BOOM_SEC, SCENE_MS, STEEL_SHIELD_FADE_MS, type Scene, type SceneKind } from './AbilityScene';
 import { Finale } from './Finale';
 import { hasSeenFinale } from '../lib/finale';
 
@@ -133,6 +138,8 @@ export function BossView({
     window.setTimeout(() => setScene((cur) => (cur?.id === id ? null : cur)), SCENE_MS[kind]);
   };
   const [flash, setFlash] = useState<'win' | null>(null);
+  /** Kiryukha's send-off still playing, over the screen that comes after the last boss. */
+  const [crowning, setCrowning] = useState(false);
   /** The ability moment on screen right now, if any — see AbilityFx. */
   const [stamp, setStamp] = useState<{ id: number; event: AbilityEvent } | null>(null);
   /**
@@ -149,6 +156,13 @@ export function BossView({
    * on its own if you land on a boss some other way (below).
    */
   const [briefing, setBriefing] = useState(false);
+  /**
+   * Whether the scouting report has been read since the boss last walked out. His abilities stay
+   * off the screen until it has: the report is where you learn what the shield and the rest
+   * mean, so they don't show up before it.
+   */
+  const [scouted, setScouted] = useState(() => wasBriefed(derived.boss.id));
+  useEffect(() => setScouted(wasBriefed(derived.boss.id)), [derived.boss.id]);
   /**
    * The closing scene: «ЭТО КОНЕЦ?», and Kiryukha breaking it. It stands between the arena's
    * bosses and the last stage, which is him — so it plays once, when that stage opens (a beat
@@ -181,9 +195,17 @@ export function BossView({
   // of a session, which is when audio becomes available at all.
   useEffect(() => {
     // Shredder's send-off has a recording of its own, wanted the moment he falls.
-    const extra = derived.boss.id === 'stormborn' ? 'cowabunga' : undefined;
-    preloadBossCues(derived.boss.line, extra);
-    const again = () => preloadBossCues(derived.boss.line, extra);
+    // The King's little Mega Knight shouts on a recording too, and so does his "mi-mi-mi".
+    const extras =
+      derived.boss.id === 'stormborn'
+        ? (['cowabunga'] as const)
+        : derived.boss.id === 'worldbreaker'
+          ? (['megaKnight', 'mimimi'] as const)
+          : derived.boss.id === 'threshold'
+            ? (['skidysh'] as const)
+            : ([] as const);
+    preloadBossCues(derived.boss.line, ...extras);
+    const again = () => preloadBossCues(derived.boss.line, ...extras);
     window.addEventListener('pointerdown', again, { once: true });
     return () => window.removeEventListener('pointerdown', again);
   }, [derived.boss.line, derived.boss.id]);
@@ -198,6 +220,7 @@ export function BossView({
   const closeBriefing = () => {
     markBriefed(derived.boss.id);
     setBriefing(false);
+    setScouted(true);
   };
   const [impact, setImpact] = useState<'hit' | 'crit' | null>(null);
   /** The dark-and-"BOSS" cut, shown once the third minion falls. */
@@ -286,10 +309,11 @@ export function BossView({
   const enemy = derived.enemy;
   /**
    * The boss's abilities on screen — shields, eyes, guns, pots, counters — only once he has
-   * walked out and said his piece. Over the "BOSS" cut or under his line they'd give the fight
-   * away before it has started, and crowd the one moment that's his.
+   * walked out, said his piece and the scouting report has been closed. Over the "BOSS" cut or
+   * under his line they'd give the fight away before it has started, and crowd the one moment
+   * that's his; before the report they'd be shapes nobody has explained yet.
    */
-  const abilitiesOn = enemy.isBoss && !bossIntro && !talking;
+  const abilitiesOn = enemy.isBoss && !bossIntro && !talking && scouted;
 
   // Bebop and Rocksteady walk on firing: a volley the moment either becomes the one you face —
   // once whatever send-off is holding the stage has finished, not over it. Not on opening the
@@ -307,7 +331,38 @@ export function BossView({
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enemyKey, interlude]);
-  const regenerating = enemy.isBoss && hasAbility(boss.abilities, 'regen');
+  const regenerating = enemy.isBoss && (hasAbility(boss.abilities, 'regen') || hasAbility(boss.abilities, 'elixir'));
+  /** The King's stage (Clash Royale): his elixir, his cannon, his tower coming down. */
+  const isKing = boss.id === 'worldbreaker';
+  /** The King drinking his elixir: a new id plays the heal on him (HealSpell). */
+  const [healId, setHealId] = useState<number | null>(null);
+  /** His laughing emote over the picture, for `ms`. */
+  const [emoteUp, setEmoteUp] = useState(false);
+  const emoteTimer = useRef<number | undefined>(undefined);
+  const showEmote = (ms: number) => {
+    setEmoteUp(true);
+    window.clearTimeout(emoteTimer.current);
+    emoteTimer.current = window.setTimeout(() => setEmoteUp(false), ms);
+  };
+  useEffect(() => () => window.clearTimeout(emoteTimer.current), []);
+  /** Tai Lung getting HP back: a dumpling flies in and he snaps it up (DumplingSnack). */
+  const [snackId, setSnackId] = useState<number | null>(null);
+  const kingHealed = () => {
+    if (boss.id === 'threshold') {
+      setSnackId(++popId);
+      window.setTimeout(feedback.nom, 520);
+      return;
+    }
+    if (!isKing) return;
+    setHealId(++popId);
+    feedback.elixirHeal();
+    // And he taunts you for it: Clash Royale's goblin, "mi-mi-mi".
+    window.setTimeout(() => {
+      feedback.mimimi();
+      showEmote(2300);
+    }, 450);
+  };
+
   const hpPct = Math.max(0, Math.min(100, (profile.enemyHp / Math.max(1, enemy.hp)) * 100));
   // While a send-off plays the bar stays empty: the next enemy's full bar belongs to his entrance.
   const shownPct = interlude != null ? 0 : hpPct;
@@ -334,7 +389,10 @@ export function BossView({
     if (!regenerating) return;
     const id = window.setInterval(() => {
       void tickArena().then((healed) => {
-        if (healed > 0) addPop(`+${healed} HP`, true);
+        if (healed > 0) {
+          addPop(`+${healed} HP`, true);
+          kingHealed();
+        }
       });
     }, 1000);
     return () => window.clearInterval(id);
@@ -387,6 +445,7 @@ export function BossView({
         // First time against him: the scouting report once he's done talking.
         // Every time he walks out — the first time, again after a loss of the thread, on a replay.
         briefAfterEntrance.current = true;
+        setScouted(false);
       } else if (result.bossDefeated || result.bossRebeaten || result.minionDefeated) feedback.bossDefeat();
       else if (result.leveledUp) feedback.levelUp();
       // The named cue belongs to the boss himself, not to the three who come first. `enemy`
@@ -412,7 +471,8 @@ export function BossView({
           setFrostPending(false);
           addPop(BLOCKED_TEXT.frozen, false);
         }, SHOT_FLY_S * 1000);
-      } else if (result.blocked) addPop(BLOCKED_TEXT[result.blocked], false);
+      } else if (result.blocked === 'odd-rep' && enemy.isBoss && boss.id === 'apex') addPop('ХЕ-ХЕ, МИМО!', false);
+      else if (result.blocked) addPop(BLOCKED_TEXT[result.blocked], false);
       // A rep swallowed by an ability shows where it went.
       const BLOCKED_SCENE: Partial<Record<NonNullable<typeof result.blocked>, SceneKind>> = {
         fee: 'coins',
@@ -468,7 +528,10 @@ export function BossView({
         } else feedback.iceCrack();
       }
       else addPop(result.isCrit ? `-${result.damage} КРИТ!` : `-${result.damage}`, result.isCrit);
-      if (result.healed > 0) addPop(`+${result.healed} HP`, true);
+      if (result.healed > 0) {
+        addPop(`+${result.healed} HP`, true);
+        if (enemy.isBoss) kingHealed();
+      }
       if (result.revived) notify('info', 'Он поднялся', 'Зеркало вернуло его с половиной HP');
       playAbilityEvents(result.events);
       setShake(result.isCrit ? 'crit' : 'hit');
@@ -480,7 +543,8 @@ export function BossView({
       // hit feel like it landed on the interface rather than on him.
       const away = Math.random() < 0.5 ? -1 : 1;
       // An ability going off moves him its own way (playAbilityEvents); the recoil would cut it off.
-      if (result.blocked === 'fee' && !result.events.length) krabsGreed();
+      if (result.blocked === 'odd-rep' && enemy.isBoss && boss.id === 'apex' && !result.events.length) goblinDodge();
+      else if (result.blocked === 'fee' && !result.events.length) krabsGreed();
       else if (result.blocked === 'piggy') pigLaugh();
       else if (!result.events.length) void enemyControls.start(
         result.blocked
@@ -502,7 +566,18 @@ export function BossView({
               },
       );
       if (!result.blocked) {
-        if (box) setHit({ id: ++popId, crit: result.isCrit, box, katana: katana ? { double: katanaDouble } : undefined });
+        if (box)
+          setHit({
+            id: ++popId,
+            crit: result.isCrit,
+            box,
+            katana: katana ? { double: katanaDouble } : undefined,
+            cannon: enemy.isBoss && boss.hitSound === 'cannon',
+            pumpkin: enemy.isBoss && boss.hitSound === 'pumpkin',
+            paw: enemy.isBoss && boss.hitSound === 'belly',
+            metal: enemy.isBoss && boss.hitSound === 'metal',
+            sand: enemy.isBoss && boss.hitSound === 'gladiator',
+          });
         setImpact(result.isCrit ? 'crit' : 'hit');
         window.setTimeout(() => setImpact(null), result.isCrit ? 320 : 200);
       }
@@ -647,6 +722,45 @@ export function BossView({
         feedback.cowabunga();
         holdStage(SCENE_MS.cowabunga);
       }
+      // Kiryukha going down: the crowd, the spartans, and the laurel wreath — the arena's yours.
+      if ((result.bossDefeated || result.bossRebeaten) && enemy.isBoss && boss.id === 'kiryukha' && art) {
+        // He was the last: the screen turns into the "all beaten" one at once, so hold that back
+        // until his send-off has played out.
+        // (Under reduced motion there's no scene to wait for.)
+        if (!calm) {
+          setCrowning(true);
+          window.setTimeout(() => setCrowning(false), SCENE_MS.laurel);
+        }
+        playScene('laurel', art);
+        holdStage(SCENE_MS.laurel - 300);
+        feedback.crowned(LAUREL_AT_SEC);
+      }
+      // Ultron going down: Mjolnir out of nowhere, and his steel bursting apart.
+      if ((result.bossDefeated || result.bossRebeaten) && enemy.isBoss && boss.id === 'absolute' && art) {
+        playScene('mjolnir', art);
+        holdStage(SCENE_MS.mjolnir - 300);
+        feedback.mjolnir(MJOLNIR_STRIKE_SEC);
+      }
+      // Tai Lung going down: the Wuxi finger hold — «СКИДЫЩ!» and a wave of gold.
+      if ((result.bossDefeated || result.bossRebeaten) && enemy.isBoss && boss.id === 'threshold' && art) {
+        playScene('wuxi', art);
+        holdStage(SCENE_MS.wuxi - 300);
+        feedback.wuxi(WUXI_BOOM_SEC);
+        // Po's «Скидыщ!» as the little finger comes down.
+        feedback.skidysh(WUXI_BOOM_SEC - 0.35, false);
+      }
+      // The Goblin going down with his own bomb: it ticks, it blows, orange smoke everywhere.
+      if ((result.bossDefeated || result.bossRebeaten) && enemy.isBoss && boss.id === 'apex' && art) {
+        playScene('goblin-blast', art);
+        holdStage(SCENE_MS['goblin-blast'] - 300);
+        feedback.goblinBoom(GOBLIN_BOOM_SEC);
+      }
+      // The King's tower coming down, and the three crowns for it.
+      if ((result.bossDefeated || result.bossRebeaten) && enemy.isBoss && boss.id === 'worldbreaker' && art) {
+        playScene('tower-fall', art);
+        feedback.towerFall();
+        holdStage(SCENE_MS['tower-fall'] - 300);
+      }
       // And he goes the way pigs go: pop.
       if ((result.bossDefeated || result.bossRebeaten) && enemy.isBoss && boss.id === 'brawler' && art) {
         playScene('pig-poof', art);
@@ -700,6 +814,22 @@ export function BossView({
     });
 
   /** The pig with an egg he shouldn't have: a snorting laugh — shaking, puffing up, going greener. */
+  /**
+   * The Goblin's "Чётный урон", made visible: the blow that doesn't count is the one he swerves
+   * out from under on his glider — a quick swoop to one side, a tilt, and back — and every so
+   * often he cackles about it. It's half of all reps, so it stays short and the laugh stays rare.
+   */
+  const goblinDodge = () => {
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    void enemyControls.start({
+      x: [0, 34 * dir, 30 * dir, 0],
+      y: [0, -10, -8, 0],
+      rotate: [0, 8 * dir, 6 * dir, 0],
+      transition: { duration: 0.42, times: [0, 0.3, 0.6, 1], ease: 'easeOut' },
+    });
+    if (Math.random() < 0.22) window.setTimeout(feedback.cackle, 120);
+  };
+
   const pigLaugh = () =>
     void enemyControls.start({
       x: [0, -5, 5, -5, 5, -3, 3, 0],
@@ -743,7 +873,8 @@ export function BossView({
     const kind = SCENES[top];
     // Gru's freeze waits for the ray's bolt to reach him.
     if (kind === 'freeze') window.setTimeout(() => playScene(kind), SHOT_FLY_S * 1000);
-    else if (kind) playScene(kind);
+    // The King's shield is gold, so it breaks into gold.
+    else if (kind) playScene(kind, undefined, kind === 'ice-shatter' && derived.boss.id === 'worldbreaker' ? 1 : undefined);
 
     if (events.includes('bulwark-broken')) feedback.iceShatter();
     if (events.includes('crit-blocked')) feedback.shieldBlock();
@@ -910,14 +1041,28 @@ export function BossView({
         finaleIntoFight.current = false;
         // Out of the finale and into the fight: the "BOSS" cut, then the scouting report.
         briefAfterEntrance.current = true;
+        setScouted(false);
         playEntrance(boss.line);
       }}
     />
   );
 
   if (derived.allBossesDefeated) {
+    // Until his send-off is over, nothing but the scene itself on a dark stage.
+    if (crowning) {
+      return (
+        <div className="arena-page min-h-[70vh]">
+          <AbilityScene scene={scene} />
+        </div>
+      );
+    }
     return (
-      <div className="arena-page flex flex-col items-center pb-8 pt-16 text-center">
+      <motion.div
+        className="arena-page flex flex-col items-center pb-8 pt-16 text-center"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
         <h1 className="mt-3 text-xl font-bold text-arena-text">Все боссы арены повержены</h1>
         <p className="mt-2 text-sm text-arena-text-dim">
           Ты прошёл всех {BOSSES.length} противников. Заходи в Speed Rush, чтобы продолжать качаться и бить рекорды.
@@ -930,7 +1075,7 @@ export function BossView({
           Посмотреть финал ещё раз
         </button>
         {finaleEl}
-      </div>
+      </motion.div>
     );
   }
 
@@ -1053,11 +1198,64 @@ export function BossView({
               {enemy.isBoss && hasAbility(boss.abilities, 'bulwark') && (
                 <IceShield
                   // Not while he's walking out and saying his piece: the shield goes up once
-                  // he's done talking, as the fight starts.
+                  // he's done talking and the scouting report is closed, as the fight starts.
                   ready={abilitiesOn}
+                  royal={isKing}
                   hpFrac={profile.enemyHp / Math.max(1, profile.fight.enemyMaxHp || enemy.hp)}
                   hitId={hit?.id ?? null}
                 />
+              )}
+              {enemy.isBoss && boss.id === 'kiryukha' && (
+                <>
+                  <KiryukhaAmbient active={abilitiesOn && interlude == null && !derived.allBossesDefeated} />
+                  <RageAura active={abilitiesOn && hpFrac > 0 && hpFrac < 0.4 && !(profile.enemyHp === 1 && profile.fight.lastStandReps > 0)} />
+                  <StillStanding
+                    active={abilitiesOn && profile.enemyHp === 1 && profile.fight.lastStandReps > 0}
+                    done={profile.fight.lastStandReps}
+                    of={abilityValue(boss.abilities, 'falseDeath')}
+                  />
+                </>
+              )}
+              {enemy.isBoss && boss.id === 'absolute' && (
+                <>
+                  <UltronAmbient active={abilitiesOn && interlude == null && !derived.allBossesDefeated} />
+                  <PuppetStrings active={abilitiesOn && interlude == null && !derived.allBossesDefeated} onDrop={feedback.stringSnap} />
+                  <RebootGlitch
+                    active={abilitiesOn && profile.enemyHp === 1 && profile.fight.lastStandReps > 0}
+                    done={profile.fight.lastStandReps}
+                    of={abilityValue(boss.abilities, 'falseDeath')}
+                  />
+                </>
+              )}
+              {enemy.isBoss && boss.id === 'threshold' && (
+                <>
+                  <TaiLungAmbient active={abilitiesOn && interlude == null && !derived.allBossesDefeated} />
+                  <DumplingSnack snackId={abilitiesOn ? snackId : null} />
+                  <DragonScroll active={abilitiesOn && interlude == null && !derived.allBossesDefeated} onOpen={feedback.scroll} />
+                </>
+              )}
+              {enemy.isBoss && boss.id === 'apex' && (
+                <GoblinAmbient active={abilitiesOn && interlude == null && !derived.allBossesDefeated} />
+              )}
+              {enemy.isBoss && isKing && (
+                <>
+                  <KingAmbient
+                    active={abilitiesOn && interlude == null && !derived.allBossesDefeated}
+                    hitId={hit?.id ?? null}
+                    critId={hit?.crit ? hit.id : null}
+                  />
+                  <KingPanic active={abilitiesOn && interlude == null && hpFrac > 0 && hpFrac < 0.3} />
+                  <ElixirBar
+                    enabled={abilitiesOn && interlude == null && !derived.allBossesDefeated && hpFrac < 1}
+                    lastRepAt={profile.fight.lastRepAt}
+                    regenAt={profile.fight.regenAt}
+                    intervalMs={regenIntervalMs(boss.abilities, perksFrom(profile.upgrades))}
+                  />
+                  <HealSpell healId={healId} />
+                  {/* Only once the fight is on — never over his entrance or before the report;
+                      his walk-out is the laugh and the "BOSS" cut, nothing more. */}
+                  <KingEmote show={emoteUp && abilitiesOn} />
+                </>
               )}
               {abilitiesOn && hasAbility(boss.abilities, 'retreat') && <RetreatPlaster used={!!profile.fight.retreatUsed} />}
               {abilitiesOn && boss.id === 'nameless' && (
@@ -1270,6 +1468,107 @@ export function BossView({
         need={abilityValue(boss.abilities, 'teamwork')}
         breakMs={SET_BREAK_MS + perksFrom(profile.upgrades).breathMs}
         onBeep={feedback.communicator}
+      />
+      <FireworkChair
+        active={abilitiesOn && boss.id === 'threshold' && !derived.allBossesDefeated && interlude == null}
+        sky={() => artRef.current?.getBoundingClientRect().top ?? null}
+        onLaunch={feedback.fireworkChair}
+      />
+      <RomanEvents
+        active={abilitiesOn && boss.id === 'kiryukha' && !derived.allBossesDefeated && interlude == null}
+        span={() => {
+          const r = artRef.current?.getBoundingClientRect();
+          return r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null;
+        }}
+        onEvent={(kind) => {
+          if (kind === 'chariot') feedback.chariot(3);
+          if (kind === 'lion') feedback.lionGag(LION_ROAR_AT, LION_MEOW_AT);
+          if (kind === 'arrows') feedback.arrowVolley(ARROWS_LAND_AT);
+          if (kind === 'spartans') feedback.spartanCry(SPARTAN_BEATS);
+          if (kind === 'flex') {
+            feedback.shutters(10, 2);
+            // The pose: his picture pumping up on each beat, catching the flashes.
+            for (const at of FLEX_BEATS)
+              window.setTimeout(
+                () =>
+                  void enemyControls.start({
+                    scale: [1, 1.07, 1.02],
+                    filter: ['brightness(1)', 'brightness(1.5)', 'brightness(1.05)'],
+                    transition: { duration: 0.45, ease: 'easeOut' },
+                  }),
+                at * 1000,
+              );
+          }
+          // The lion's roar knocks him back a touch; the arrows' tings make him flinch not at all.
+          if (kind === 'lion')
+            window.setTimeout(() => void enemyControls.start({ x: [0, 6, -3, 0], transition: { duration: 0.4 } }), LION_ROAR_AT * 1000);
+        }}
+      />
+      <AvengersAssist
+        active={abilitiesOn && boss.id === 'absolute' && !derived.allBossesDefeated && interlude == null}
+        span={() => {
+          const r = artRef.current?.getBoundingClientRect();
+          return r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null;
+        }}
+        onAssist={(who, hitAt) => (who === 'ironman' ? feedback.repulsor(hitAt) : feedback.shieldThrow(hitAt))}
+        onHit={() =>
+          void enemyControls.start({
+            x: [0, 16, -6, 0],
+            rotate: [0, 4, -2, 0],
+            filter: ['brightness(1)', 'brightness(2)', 'brightness(1)'],
+            transition: { duration: 0.4, ease: 'easeOut' },
+          })
+        }
+      />
+      <DronePushups
+        active={abilitiesOn && boss.id === 'absolute' && !derived.allBossesDefeated && interlude == null}
+        span={() => {
+          const r = artRef.current?.getBoundingClientRect();
+          return r ? { left: r.left, right: r.right, bottom: r.bottom } : null;
+        }}
+        onPushup={feedback.droneBlip}
+      />
+      <FuriousRaid
+        active={abilitiesOn && boss.id === 'threshold' && !derived.allBossesDefeated && interlude == null}
+        span={() => {
+          const r = artRef.current?.getBoundingClientRect();
+          return r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null;
+        }}
+        onBlow={(blow) => {
+          if (blow === 'belly') feedback.bellyBump();
+          else feedback.kungFuHit();
+          // Tai Lung knocked about by each blow: up off Po's belly, sideways off the others.
+          void enemyControls.start(
+            blow === 'belly'
+              ? { y: [0, -26, 0, -8, 0], rotate: [0, -4, 2, -1, 0], transition: { duration: 0.6, ease: 'easeOut' } }
+              : { x: [0, 14, -6, 0], rotate: [0, 5, -2, 0], filter: ['brightness(1)', 'brightness(1.8)', 'brightness(1)'], transition: { duration: 0.4, ease: 'easeOut' } },
+          );
+        }}
+      />
+      <GliderFlyby
+        active={abilitiesOn && boss.id === 'apex' && !derived.allBossesDefeated && interlude == null}
+        span={() => {
+          const r = artRef.current?.getBoundingClientRect();
+          return r ? { top: r.top, bottom: r.bottom } : null;
+        }}
+        onPass={() => {
+          feedback.gliderPass();
+          window.setTimeout(feedback.cackle, 300);
+        }}
+        onBlast={feedback.pumpkinBlast}
+      />
+      <SpideyTeam
+        active={abilitiesOn && boss.id === 'apex' && !derived.allBossesDefeated && interlude == null}
+        span={() => {
+          const r = artRef.current?.getBoundingClientRect();
+          return r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null;
+        }}
+        onThwip={feedback.thwip}
+      />
+      <MegaKnightRun
+        active={abilitiesOn && isKing && !derived.allBossesDefeated && interlude == null}
+        under={() => artRef.current?.getBoundingClientRect().bottom ?? null}
+        onShout={feedback.megaKnight}
       />
       <LaughGas
         active={abilitiesOn && !derived.allBossesDefeated && hasAbility(boss.abilities, 'jokerCard') && interlude == null}

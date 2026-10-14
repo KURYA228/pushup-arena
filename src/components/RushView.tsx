@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Flame, Trophy, Zap } from 'lucide-react';
+import { Flame, RefreshCw, Trophy, Zap } from 'lucide-react';
 import type { ProfileRecord, RepResult, RepUndo, ToastKind } from '../types';
 import type { Feedback } from '../hooks/useFeedback';
 import { ACHIEVEMENTS } from '../data/achievements';
@@ -8,8 +8,14 @@ import { streakNotices } from '../lib/streak';
 import { CameraPanel } from './CameraPanel';
 import { Burst } from './Burst';
 import { GhostRace } from './GhostRace';
+import { DuelHud } from './DuelHud';
+import { DuelResult } from './DuelResult';
+import { DuelEntry, DuelMatching, DuelVersus } from './DuelLobby';
 import { tapCounter, tryOpenDevPanel } from '../lib/devGate';
 import { ghostAt } from '../lib/ghost';
+import { DUEL_DAILY_LIMIT, DUEL_START, duelOutcome, duelsToday, exhaustedToday, pickOpponent, sparringRun, type DuelOutcome } from '../data/duel';
+import type { DuelOpponent } from '../lib/cloud';
+import { localDay } from '../lib/stats';
 
 const DURATION_S = 60;
 const COMBO_WINDOW_MS = 2000;
@@ -22,7 +28,21 @@ const FINAL_SECONDS = 10;
 /** Combo at which the card catches fire. */
 const HOT_COMBO = 5;
 
-type SessionState = 'idle' | 'countdown' | 'running' | 'finished';
+type SessionState = 'idle' | 'matching' | 'versus' | 'countdown' | 'running' | 'finished';
+
+/**
+ * Who a 1 на 1 is against: a player's recorded best Rush, or — when there's nobody to challenge —
+ * the sparring robot, which is unrated (`rating` null).
+ */
+interface Rival {
+  id: string | null;
+  name: string;
+  avatar: string | null;
+  level?: number;
+  rating: number | null;
+  best: number;
+  run: number[] | null;
+}
 
 let plusId = 0;
 
@@ -33,6 +53,9 @@ export function RushView({
   finishRush,
   feedback,
   notify,
+  me,
+  fetchOpponents,
+  recordDuel,
 }: {
   profile: ProfileRecord;
   registerRushRep: () => Promise<RepResult>;
@@ -40,6 +63,12 @@ export function RushView({
   finishRush: (reps: number, bestCombo: number, run: number[]) => Promise<{ isNewRecord: boolean; newAchievements: string[] }>;
   feedback: Feedback;
   notify: (kind: ToastKind, title: string, description?: string) => void;
+  /** You, as the 1 на 1 card shows you; null name when not signed in. */
+  me: { name: string | null; avatar: string | null; level: number };
+  /** Players to challenge near a rating (empty when not signed in or nobody's there). */
+  fetchOpponents: (rating: number) => Promise<DuelOpponent[]>;
+  /** Books a 1 на 1's result; `opponent` null for an unrated sparring round. */
+  recordDuel: (outcome: DuelOutcome, opponent: { id: string; rating: number } | null) => Promise<{ before: number; after: number }>;
 }) {
   const [state, setState] = useState<SessionState>('idle');
   const [timeLeft, setTimeLeft] = useState(DURATION_S);
@@ -60,6 +89,21 @@ export function RushView({
   /** The record being raced, frozen at the start so beating it mid-run doesn't move the target. */
   const [ghost, setGhost] = useState<{ run: number[] | undefined; best: number }>({ run: undefined, best: 0 });
   const [elapsed, setElapsed] = useState(0);
+
+  /** Solo against your own record, or 1 на 1 against someone else's. */
+  const [mode, setMode] = useState<'solo' | 'duel'>('solo');
+  const [rival, setRival] = useState<Rival | null>(null);
+  /** How the last 1 на 1 went. */
+  const [duelResult, setDuelResult] = useState<{ outcome: DuelOutcome; before: number; after: number; rated: boolean } | null>(null);
+  /** Opponents met lately, so "another one" finds someone else. */
+  const recentRef = useRef<Set<string>>(new Set());
+  const myRating = profile.duelRating ?? DUEL_START;
+  /** Rated duels against the current rival today, out of DUEL_DAILY_LIMIT. */
+  const today = localDay(Date.now());
+  const rivalToday = rival?.id ? duelsToday(profile.duelDay, today, rival.id) : 0;
+  const rivalSpent = !!rival?.id && rivalToday >= DUEL_DAILY_LIMIT;
+  /** Why the robot came out instead of a player: nobody to call, or everyone near used up for today. */
+  const [allSpent, setAllSpent] = useState(false);
 
   // Advance the ghost a few times a second; the clock's own one-second tick is too coarse.
   useEffect(() => {
@@ -111,7 +155,38 @@ export function RushView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft, state]);
 
-  const startSession = () => {
+  /** Finds someone to take on: a player rated near you with a record, or the sparring robot. */
+  const findRival = async () => {
+    // No record, no duel: the record is what goes up against theirs.
+    if (!(profile.rushBestReps > 0)) return;
+    setMode('duel');
+    setDuelResult(null);
+    setState('matching');
+    // Long enough for the search to read as one, even when the answer is instant.
+    const [list] = await Promise.all([fetchOpponents(myRating), new Promise((r) => window.setTimeout(r, 1300))]);
+    // Whoever you've already met DUEL_DAILY_LIMIT times today sits out until tomorrow.
+    const spent = exhaustedToday(profile.duelDay, localDay(Date.now()));
+    let picked = pickOpponent(list, myRating, new Set([...recentRef.current, ...spent]));
+    // Met everyone near you lately: start the round of them again.
+    if (!picked && recentRef.current.size) {
+      recentRef.current.clear();
+      picked = pickOpponent(list, myRating, spent);
+    }
+    setAllSpent(!picked && list.some((c) => c.rushBest > 0 && spent.has(c.id)));
+    if (picked) {
+      recentRef.current.add(picked.id);
+      setRival({ id: picked.id, name: picked.name, avatar: picked.avatar, level: picked.level, rating: picked.rating, best: picked.rushBest, run: picked.run });
+    } else {
+      // Nobody to challenge yet: a robot about as good as your own best.
+      const best = Math.max(12, profile.rushBestReps || 15);
+      setRival({ id: null, name: 'Спарринг-робот', avatar: null, rating: null, best, run: sparringRun(best) });
+    }
+    setState('versus');
+  };
+
+  const startSession = (as: 'solo' | 'duel' = mode) => {
+    setMode(as);
+    setDuelResult(null);
     setReps(0);
     setCombo(1);
     setBestComboSession(1);
@@ -124,7 +199,8 @@ export function RushView({
     setNewRecord(false);
     setPluses([]);
     runRef.current = [];
-    setGhost({ run: profile.rushBestRun, best: profile.rushBestReps });
+    // The ghost: your record solo, their record in a 1 на 1.
+    setGhost(as === 'duel' && rival ? { run: rival.run ?? undefined, best: rival.best } : { run: profile.rushBestRun, best: profile.rushBestReps });
     setCount(COUNTDOWN_FROM);
     setState('countdown');
   };
@@ -140,6 +216,13 @@ export function RushView({
     for (const id of newAchievements) {
       const def = ACHIEVEMENTS.find((a) => a.id === id);
       if (def) notify('achievement', `Достижение: ${def.title}`, def.description);
+    }
+    if (mode === 'duel' && rival) {
+      const outcome = duelOutcome(repsRef.current, rival.best);
+      // Past today's limit against them it's still a fight, just not for rating.
+      const rated = rival.id != null && rival.rating != null && !rivalSpent;
+      const { before, after } = await recordDuel(outcome, rated ? { id: rival.id!, rating: rival.rating! } : null);
+      setDuelResult({ outcome, before, after, rated });
     }
   };
 
@@ -206,8 +289,28 @@ export function RushView({
   // The ring empties with the clock. Circumference of r=16 in a 36-unit box.
   const RING = 2 * Math.PI * 16;
 
+  // In a 1 на 1 the scoreboard plaque stands in for the clock, combo, counter and ghost track.
+  const dueling = mode === 'duel' && !!rival && (state === 'running' || state === 'countdown');
+  // …and around it — the search, the face-off, the result — the duel cards have the screen to themselves.
+  const duelOver = state === 'matching' || (mode === 'duel' && !!rival && (state === 'versus' || state === 'finished'));
+  const ghostReps = ghostAt(ghost.run, ghost.best, elapsed, DURATION_S * 1000);
+
   return (
     <div className="arena-page relative pb-8 pt-6 text-center">
+      {dueling && rival ? (
+        <DuelHud
+          you={{ name: me.name ?? 'Ты', avatar: me.avatar, level: me.level, rating: myRating }}
+          rival={{ name: rival.name, avatar: rival.avatar, level: rival.level, rating: rival.rating, emoji: rival.id ? undefined : '🤖' }}
+          myReps={reps}
+          rivalReps={ghostReps}
+          timeLeft={timeLeft}
+          duration={DURATION_S}
+          final={final}
+          rated={rival.id != null && rival.rating != null && !rivalSpent}
+          myBest={profile.rushBestReps}
+        />
+      ) : duelOver ? null : (
+      <>
       <h1 className="mb-1 text-xl font-bold text-arena-text">Speed Rush</h1>
       <p className="mb-4 text-xs text-arena-text-dim">60 секунд, максимум повторов, комбо за темп</p>
 
@@ -324,19 +427,61 @@ export function RushView({
 
       {/* The race against the record: two bars, you and the ghost of your best run. */}
       {(state === 'running' || state === 'countdown') && ghost.best > 0 && (
-        <GhostRace you={reps} ghost={ghostAt(ghost.run, ghost.best, elapsed, DURATION_S * 1000)} best={ghost.best} />
+        <GhostRace
+          you={reps}
+          ghost={ghostReps}
+          best={ghost.best}
+        />
+      )}
+      </>
       )}
 
       {state === 'idle' && (
-        // The pulse moves a wrapper: the button's own transform is its press.
-        <motion.div
-          animate={calm ? {} : { scale: [1, 1.03, 1] }}
-          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
-        >
-          <button onClick={startSession} className="btn-3d w-full">
-            Начать Rush
-          </button>
-        </motion.div>
+        <>
+          {/* The pulse moves a wrapper: the button's own transform is its press. */}
+          <motion.div
+            animate={calm ? {} : { scale: [1, 1.03, 1] }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <button onClick={() => startSession('solo')} className="btn-3d w-full">
+              Начать Rush
+            </button>
+          </motion.div>
+          {/* 1 на 1: a minute against someone else's record — once you have one of your own. */}
+          <DuelEntry
+            rating={myRating}
+            wins={profile.duelWins ?? 0}
+            losses={profile.duelLosses ?? 0}
+            draws={profile.duelDraws ?? 0}
+            locked={!(profile.rushBestReps > 0)}
+            onFind={() => void findRival()}
+          />
+        </>
+      )}
+
+      {state === 'matching' && <DuelMatching you={{ name: me.name ?? 'Ты', avatar: me.avatar, level: me.level, rating: myRating }} />}
+
+      {state === 'versus' && rival && (
+        <DuelVersus
+          you={{ name: me.name ?? 'Ты', avatar: me.avatar, level: me.level, rating: myRating }}
+          rival={{ name: rival.name, avatar: rival.avatar, level: rival.level, rating: rival.rating, emoji: rival.id ? undefined : '🤖' }}
+          myBest={profile.rushBestReps}
+          rivalBest={rival.best}
+          today={rival.id ? rivalToday : null}
+          spent={rivalSpent}
+          note={
+            rival.id
+              ? undefined
+              : allSpent
+                ? 'С соперниками твоего уровня на сегодня всё — разомнись с роботом, завтра снова.'
+                : me.name
+                  ? 'Пока некого вызвать — разомнись с роботом.'
+                  : 'Войди в аккаунт, чтобы соревноваться с живыми игроками.'
+          }
+          onFight={() => startSession('duel')}
+          onAnother={() => void findRival()}
+          onBack={() => setState('idle')}
+        />
       )}
       {/* Step two of the way into the dev panel: an invisible patch under the start button.
           Not announced to screen readers and out of the tab order — it isn't a control. */}
@@ -352,6 +497,22 @@ export function RushView({
 
       {state === 'finished' && (
         <div className="space-y-3">
+          {mode === 'duel' && rival ? (
+            <DuelResult
+              you={{ name: me.name ?? 'Ты', avatar: me.avatar, level: me.level, rating: myRating }}
+              rival={{ name: rival.name, avatar: rival.avatar, level: rival.level, rating: rival.rating, emoji: rival.id ? undefined : '🤖' }}
+              myReps={reps}
+              rivalReps={rival.best}
+              outcome={duelOutcome(reps, rival.best)}
+              rating={duelResult}
+              newRecord={newRecord}
+              bestCombo={bestComboSession}
+              onVerdict={() => {
+                if (duelOutcome(repsRef.current, rival.best) === 'win') feedback.levelUp();
+              }}
+            />
+          ) : (
+          <>
           {/* The bell: a stamp that slams down, and confetti if the record fell. */}
           <div className="relative flex flex-col items-center py-2">
             <motion.span
@@ -369,12 +530,46 @@ export function RushView({
           <p className="text-sm text-arena-text-dim">
             Готово: <span className="font-semibold text-arena-text">{reps}</span> повторов
           </p>
-          <button
-            onClick={startSession}
-            className="btn-3d w-full"
-          >
-            Ещё раз
-          </button>
+          </>
+          )}
+          {mode === 'duel' && rival ? (
+            // The buttons wait for the reveal to play out.
+            <motion.div
+              className="space-y-3"
+              initial={calm ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 2.6, duration: 0.3 }}
+            >
+              {/* No rematch past the daily limit: that's how one record gets farmed for rating. */}
+              {rivalSpent ? (
+                <p className="rounded-xl bg-arena-surface-2 px-3 py-2.5 text-xs text-arena-text-dim">
+                  На сегодня с этим соперником всё — не больше {DUEL_DAILY_LIMIT} боёв в день с одним. Реванш завтра.
+                </p>
+              ) : (
+                <button onClick={() => startSession('duel')} className="btn-3d w-full">
+                  Реванш{rival.id ? ` · ${rivalToday}/${DUEL_DAILY_LIMIT}` : ''}
+                </button>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void findRival()}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-arena-surface-2 py-2.5 text-xs font-medium text-arena-text active:scale-[0.98]"
+                >
+                  <RefreshCw size={13} /> Новый соперник
+                </button>
+                <button
+                  onClick={() => startSession('solo')}
+                  className="flex-1 rounded-xl bg-arena-surface-2 py-2.5 text-xs font-medium text-arena-text-dim active:scale-[0.98]"
+                >
+                  Соло
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            <button onClick={() => startSession('solo')} className="btn-3d w-full">
+              Ещё раз
+            </button>
+          )}
         </div>
       )}
 
@@ -410,4 +605,3 @@ export function RushView({
     </div>
   );
 }
-

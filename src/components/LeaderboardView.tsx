@@ -10,6 +10,7 @@ import {
   Flame,
   LogOut,
   Medal,
+  Pencil,
   RefreshCw,
   Upload,
 } from 'lucide-react';
@@ -18,6 +19,8 @@ import type { Cloud, LeaderboardRow } from '../hooks/useCloud';
 import { movement, readRanks, saveRanks } from '../lib/rankHistory';
 import { AuthView, ChooseNameForm } from './AuthView';
 import { Avatar } from './PlayerBadge';
+import { AvatarPicker } from './AvatarPicker';
+import { unlockedAvatars } from '../lib/avatar';
 import { getRank, leagueFor, strengthFor } from '../data/ranks';
 import { CountUp } from './CountUp';
 import { TierIcon } from './TierIcon';
@@ -37,6 +40,8 @@ const SORTS = [
   { id: 'rush', label: 'Rush', unit: '', value: (r: LeaderboardRow) => r.rushBestReps },
   { id: 'league', label: 'Лига', unit: '', value: (r: LeaderboardRow) => r.weekReps },
   { id: 'set', label: 'Подход', unit: '', value: (r: LeaderboardRow) => r.bestSet },
+  // Points from 1 на 1 (Rush → «1 на 1»): everyone starts at 1000.
+  { id: 'duel', label: '1 на 1', unit: 'очк.', value: (r: LeaderboardRow) => r.duelRating },
 ] as const;
 
 type SortId = (typeof SORTS)[number]['id'];
@@ -100,10 +105,16 @@ export function LeaderboardView({
   }, [refresh]);
 
   const active = SORTS.find((s) => s.id === sort)!;
+  const myRowId = cloud.session?.user.id;
   const ordered = useMemo(
-    () => [...rows].sort((a, b) => active.value(b) - active.value(a)),
-    [rows, active],
+    () =>
+      [...rows]
+        // Your own row wears the avatar you've just picked, not the one the board was fetched with.
+        .map((r) => (r.id === myRowId ? { ...r, avatar: cloud.avatar } : r))
+        .sort((a, b) => active.value(b) - active.value(a)),
+    [rows, active, myRowId, cloud.avatar],
   );
+  const [picking, setPicking] = useState(false);
 
   if (!cloud.configured) {
     return (
@@ -167,7 +178,18 @@ export function LeaderboardView({
     // its own ceiling instead of filling the page the way the arena screens do.
     <div className="arena-page pb-8 pt-6 [&>*]:mx-auto [&>*]:max-w-2xl">
       <header className="mb-4 flex items-center gap-3">
-        <Avatar name={cloud.name} size="md" level={myIndex >= 0 ? ordered[myIndex].level : undefined} />
+        {/* Your avatar: tap it to choose another. */}
+        <button
+          type="button"
+          onClick={() => setPicking(true)}
+          aria-label="Сменить аватарку"
+          className="relative shrink-0 rounded-full active:scale-95"
+        >
+          <Avatar name={cloud.name} avatar={cloud.avatar} size="md" level={myIndex >= 0 ? ordered[myIndex].level : undefined} />
+          <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-arena-border bg-arena-surface-2 text-arena-text">
+            <Pencil size={10} />
+          </span>
+        </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-bold text-arena-text">{cloud.name}</p>
           <p className="truncate text-[11px] text-arena-text-dim">
@@ -183,6 +205,20 @@ export function LeaderboardView({
           <LogOut size={15} />
         </button>
       </header>
+
+      <AnimatePresence>
+        {picking && (
+          <AvatarPicker
+            name={cloud.name}
+            level={myIndex >= 0 ? ordered[myIndex].level : undefined}
+            avatar={cloud.avatar}
+            unlocked={unlockedAvatars(profile)}
+            onPick={cloud.setAvatar}
+            onUpload={cloud.uploadAvatarPhoto}
+            onClose={() => setPicking(false)}
+          />
+        )}
+      </AnimatePresence>
 
       <div className="mb-3 flex gap-2">
         <button
@@ -309,6 +345,7 @@ function Podium({ rows, sortId, myId }: { rows: LeaderboardRow[]; sortId: SortId
               </motion.span>
               <Avatar
                 name={row.displayName}
+                avatar={row.avatar}
                 level={row.level}
                 size={place === 0 ? 'md' : 'sm'}
                 className={place === 0 ? 'arena-glow' : undefined}
@@ -412,7 +449,7 @@ function Row({
       )}
     >
       <RankMark rank={rank} />
-      <Avatar name={row.displayName} size="sm" level={row.level} />
+      <Avatar name={row.displayName} avatar={row.avatar} size="sm" level={row.level} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate text-sm font-semibold" style={{ color: getRank(row.level).color }}>
           <span className="truncate">{row.displayName}</span>
@@ -445,6 +482,12 @@ function Row({
         <span className="text-sm font-bold tabular-nums text-arena-text">{metric.value(row)}</span>
         {/* On the league tab the number is this week's push-ups; the step it puts them on. */}
         {sortId === 'league' && <LeagueStep reps={row.weekReps} />}
+        {/* On the 1 на 1 tab the number is points; the record behind them. */}
+        {sortId === 'duel' && (
+          <span className="text-[10px] tabular-nums text-arena-text-dim">
+            {row.duelWins}–{row.duelLosses}
+          </span>
+        )}
       </span>
     </motion.li>
   );

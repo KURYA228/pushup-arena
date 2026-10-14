@@ -36,7 +36,8 @@ export type AbilityKind =
   | 'endCrystals'
   | 'tribute'
   | 'treasury'
-  | 'turtleSoup';
+  | 'turtleSoup'
+  | 'elixir';
 
 /**
  * The one pause the whole game measures by: five seconds or more ends a set. Every rule that
@@ -180,6 +181,10 @@ export const ABILITY_INFO: Record<
     describe: (v) =>
       `каждая пауза дольше ${SET_BREAK_MS / 1000} секунд подогревает котёл; на ${SOUP_BOILS_AFTER}-й суп готов — он ужинает и лечится на ${Math.round(v * 100)}% HP. ${SOUP_COOL_REPS} повторов без паузы остужают котёл`,
   },
+  elixir: {
+    name: 'Эликсир',
+    describe: (v) => `${v} секунд без удара — он выпивает эликсир и снова на полном HP`,
+  },
   treasury: {
     name: 'Казна',
     describe: (v) =>
@@ -217,6 +222,7 @@ export const ABILITY_TIPS: Record<AbilityKind, { icon: string; tip: string }> = 
   teamwork: { icon: '🤝', tip: 'Подходы минимум по 5 — короче не засчитаются.' },
   endCrystals: { icon: '💎', tip: 'Подходы по 15 без паузы ломают кристаллы — потом урон полный.' },
   tribute: { icon: '👑', tip: 'Каждый седьмой повтор подхода уходит в казну — закладывай лишние.' },
+  elixir: { icon: '🧪', tip: 'Бей без долгих пауз: дашь ему отдышаться — начнёшь сначала.' },
   turtleSoup: { icon: '🍲', tip: `Не давай котлу закипеть: подход в ${SOUP_COOL_REPS} повторов без паузы остужает его.` },
   treasury: { icon: '💰', tip: 'После половины HP богатыри прикроют его на 10 повторов — просто дожимай.' },
 };

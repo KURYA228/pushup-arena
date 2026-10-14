@@ -1,6 +1,7 @@
 import type { AbilityEvent, BlockedReason, FightState } from './data/combat';
 import type { Upgrades } from './data/shop';
 import type { RankUp } from './data/ranks';
+import type { DuelDay } from './data/duel';
 import type { Training } from './lib/training';
 
 // Central persisted profile shape stored in IndexedDB (see src/db/db.ts).
@@ -40,6 +41,13 @@ export interface ProfileRecord extends Training {
   rushBestCombo: number;
   /** When each rep of the record Rush landed, ms from the start — the ghost replays it. */
   rushBestRun?: number[];
+  /** 1 на 1 (src/data/duel.ts): the duel rating and record. Absent on older saves — DUEL_START and none. */
+  duelRating?: number;
+  duelWins?: number;
+  duelLosses?: number;
+  duelDraws?: number;
+  /** Today's rated duels by opponent (src/data/duel.ts, DUEL_DAILY_LIMIT a day each). */
+  duelDay?: DuelDay;
   /** Push-ups to reach Monday to Sunday; absent means the default. See src/lib/weekly.ts. */
   weeklyGoal?: number;
   /** A daily norm set by hand; absent means it's worked out from the weekly goal. */

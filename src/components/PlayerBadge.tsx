@@ -1,10 +1,13 @@
 import { getRank, glows } from '../data/ranks';
 import clsx from 'clsx';
+import { useState } from 'react';
+import { avatarSrc } from '../lib/avatar';
 
 /**
- * A player's avatar: the first letter of the name over a colour derived from the name itself.
- * Nobody uploads a picture in a push-up app, but a board of identical grey rows is unreadable —
- * a stable colour per player makes finding yourself instant.
+ * A player's avatar: the picture they chose (a portrait from the gallery or their own photo, see
+ * src/lib/avatar.ts), or else the first letter of the name over a colour derived from the name
+ * itself — a board of identical grey rows is unreadable, a stable colour per player makes finding
+ * yourself instant.
  */
 
 /** FNV-style fold: small, stable across reloads, and spread evenly enough over the wheel. */
@@ -28,17 +31,32 @@ export function Avatar({
   size = 'sm',
   className,
   level,
+  avatar: chosen,
 }: {
   name: string;
   size?: keyof typeof SIZES;
   className?: string;
   /** Wears the frame of this level's title (see src/data/ranks.ts), when given. */
   level?: number;
+  /** What they chose for it (src/lib/avatar.ts); the letter when there's nothing, or it won't load. */
+  avatar?: string | null;
 }) {
   const trimmed = name.trim();
   const hue = hueOf(trimmed.toLowerCase());
   const rank = level != null ? getRank(level) : null;
-  const avatar = (
+  const src = avatarSrc(chosen);
+  const [broken, setBroken] = useState<string | null>(null);
+  const avatar = src && broken !== src ? (
+    <img
+      src={src}
+      alt=""
+      aria-hidden
+      draggable={false}
+      onError={() => setBroken(src)}
+      className={clsx('shrink-0 select-none rounded-full bg-arena-surface-2 object-cover', SIZES[size], className)}
+      style={{ objectPosition: '50% 25%' }}
+    />
+  ) : (
     <span
       aria-hidden
       className={clsx(

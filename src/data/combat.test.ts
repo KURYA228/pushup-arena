@@ -100,22 +100,50 @@ test('Регенерация никогда не уменьшает HP, даже
   );
 });
 
-test('Без остановки: длинная пауза стирает весь урон подхода', () => {
-  const start = at('worldbreaker', BOSS_STEP);
-  const worked = reps(start, 12);
-  assert.ok(worked.state.enemyHp < start.enemyHp, 'урон должен был пройти');
+/**
+ * "Без остановки" is in the rules but no boss carries it at the moment (the King, who had it,
+ * heals on a pause instead). Lent to a stage for the length of a test so the rule stays covered.
+ */
+function withNoStop(bossId: string, run: () => void) {
+  const boss = BOSSES[indexOf(bossId)];
+  const own = boss.abilities;
+  boss.abilities = [{ kind: 'noStop', value: 1 }];
+  try {
+    run();
+  } finally {
+    boss.abilities = own;
+  }
+}
 
-  const after = resolveArenaRep(worked.state, worked.endedAt + NO_STOP_MS, 1);
-  // HP вернулось к началу подхода, минус только текущий повтор.
-  assert.equal(after.next.enemyHp, start.enemyHp - after.damage);
+test('Без остановки: длинная пауза стирает весь урон подхода', () => {
+  withNoStop('worldbreaker', () => {
+    const start = at('worldbreaker', BOSS_STEP);
+    const worked = reps(start, 12);
+    assert.ok(worked.state.enemyHp < start.enemyHp, 'урон должен был пройти');
+
+    const after = resolveArenaRep(worked.state, worked.endedAt + NO_STOP_MS, 1);
+    // HP вернулось к началу подхода, минус только текущий повтор.
+    assert.equal(after.next.enemyHp, start.enemyHp - after.damage);
+  });
 });
 
 test('Без остановки: пауза короче порога урон не стирает', () => {
-  const worked = reps(at('worldbreaker', BOSS_STEP), 12);
-  const hp = worked.state.enemyHp;
-  // `endedAt` уже на секунду после последнего повтора; ещё секунда — пауза 2 с, короче порога.
-  const after = resolveArenaRep(worked.state, worked.endedAt + 1000, 1);
-  assert.ok(after.next.enemyHp < hp, 'HP не должно откатываться');
+  withNoStop('worldbreaker', () => {
+    const worked = reps(at('worldbreaker', BOSS_STEP), 12);
+    const hp = worked.state.enemyHp;
+    // `endedAt` уже на секунду после последнего повтора; ещё секунда — пауза 2 с, короче порога.
+    const after = resolveArenaRep(worked.state, worked.endedAt + 1000, 1);
+    assert.ok(after.next.enemyHp < hp, 'HP не должно откатываться');
+  });
+});
+
+test('Король: десять секунд без удара — и он снова на полном HP', () => {
+  const start = at('worldbreaker', BOSS_STEP);
+  const worked = reps(start, 20);
+  const since = worked.state.fight.regenAt;
+  assert.ok(since != null);
+  assert.equal(applyIdleRegen(worked.state, since + 10_000 - 1).healed, 0, 'до десяти секунд не лечится');
+  assert.equal(applyIdleRegen(worked.state, since + 10_000).state.enemyHp, start.enemyHp);
 });
 
 test('Чётный урон: половина повторов уходит впустую', () => {

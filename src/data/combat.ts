@@ -16,6 +16,7 @@ import {
   damageDealt,
   hasAbility,
   xpMultiplier,
+  type BossAbility,
 } from './abilities.ts';
 import { BOSSES, BOSS_STEP, encounterAt, firstStep } from './bosses.ts';
 import { NO_PERKS, type PlayerPerks } from './shop.ts';
@@ -174,6 +175,12 @@ export function freshFight(enemyHp: number): FightState {
  * the pressure is supposed to be felt. Whole ticks are consumed from `regenAt` rather than
  * measuring against "now", so calling this once a second or once an hour gives the same result.
  */
+/** How long a pause has to run before a healing boss gets HP back — one tick of it. */
+export function regenIntervalMs(abilities: BossAbility[], perks: PlayerPerks = NO_PERKS): number {
+  const base = hasAbility(abilities, 'elixir') ? abilityValue(abilities, 'elixir') * 1000 : SET_BREAK_MS;
+  return base + perks.breathMs;
+}
+
 export function applyIdleRegen(
   state: ArenaState,
   now: number,
@@ -182,12 +189,14 @@ export function applyIdleRegen(
   const boss = BOSSES[Math.min(state.bossIndex, BOSSES.length - 1)];
   const enemy = encounterAt(boss, state.stageStep);
   const from = state.fight.regenAt;
-  if (!enemy.isBoss || !hasAbility(boss.abilities, 'regen') || from == null) {
+  // "Эликсир" (the King) is the same clock with a longer tick and the whole bar back on it.
+  const elixir = hasAbility(boss.abilities, 'elixir');
+  if (!enemy.isBoss || !(elixir || hasAbility(boss.abilities, 'regen')) || from == null) {
     return { state, healed: 0 };
   }
 
   // "Второе дыхание" stretches the tick: the boss waits longer before he starts to heal.
-  const interval = SET_BREAK_MS + perks.breathMs;
+  const interval = regenIntervalMs(boss.abilities, perks);
   const ticks = Math.floor((now - from) / interval);
   if (ticks <= 0) return { state, healed: 0 };
 
@@ -195,7 +204,7 @@ export function applyIdleRegen(
   // jump, a save written by an older build) would otherwise clamp a healthy boss *down*, and
   // "healing" that removes HP is never right. The Math.max is the belt to that braces.
   const max = Math.max(encounterAt(boss, state.stageStep).hp, state.fight.enemyMaxHp);
-  const perTick = Math.max(1, Math.round(max * abilityValue(boss.abilities, 'regen')));
+  const perTick = elixir ? max : Math.max(1, Math.round(max * abilityValue(boss.abilities, 'regen')));
   const hp = Math.max(state.enemyHp, Math.min(max, state.enemyHp + ticks * perTick));
 
   return {

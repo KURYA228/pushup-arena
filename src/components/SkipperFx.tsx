@@ -19,7 +19,8 @@ const IMPACTS: [number, number][] = [
   [40, 72],
 ];
 
-export function IceShield({ hpFrac, hitId, ready }: { hpFrac: number; hitId: number | null; ready: boolean }) {
+/** `royal`: the King's — the same pane in gold glass with his crown in it, instead of ice. */
+export function IceShield({ hpFrac, hitId, ready, royal = false }: { hpFrac: number; hitId: number | null; ready: boolean; royal?: boolean }) {
   const up = ready && hpFrac > 0.6;
   const strikes = CRACK_AT.filter((t) => hpFrac <= t).length;
   const [seed] = useState(() => 1 + Math.floor(Math.random() * 100000));
@@ -30,17 +31,30 @@ export function IceShield({ hpFrac, hitId, ready }: { hpFrac: number; hitId: num
           key="shield"
           aria-hidden
           className="pointer-events-none absolute inset-[-2%] z-10 overflow-hidden rounded-[18%]"
-          style={{
-            background: 'linear-gradient(160deg, rgba(255,255,255,0.32), rgba(186,230,253,0.16) 35%, rgba(125,211,252,0.12) 70%, rgba(56,189,248,0.24))',
-            border: '2px solid rgba(224,242,254,0.7)',
-            boxShadow: 'inset 0 0 22px rgba(224,242,254,0.5), 0 0 16px rgba(125,211,252,0.45)',
-          }}
+          style={
+            royal
+              ? {
+                  background: 'linear-gradient(160deg, rgba(255,255,255,0.3), rgba(253,230,138,0.16) 35%, rgba(250,204,21,0.1) 70%, rgba(202,138,4,0.24))',
+                  border: '3px solid rgba(250,204,21,0.85)',
+                  boxShadow: 'inset 0 0 22px rgba(253,224,71,0.45), 0 0 16px rgba(234,179,8,0.5)',
+                }
+              : {
+                  background: 'linear-gradient(160deg, rgba(255,255,255,0.32), rgba(186,230,253,0.16) 35%, rgba(125,211,252,0.12) 70%, rgba(56,189,248,0.24))',
+                  border: '2px solid rgba(224,242,254,0.7)',
+                  boxShadow: 'inset 0 0 22px rgba(224,242,254,0.5), 0 0 16px rgba(125,211,252,0.45)',
+                }
+          }
           initial={{ opacity: 0, scale: 1.15 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 1.06, transition: { duration: 0.12 } }}
           transition={{ type: 'spring', stiffness: 320, damping: 22 }}
         >
           <div className="absolute left-[10%] top-[5%] h-[50%] w-[7%] rotate-[20deg] rounded-full bg-white/40 blur-[2px]" />
+          {royal && (
+            <svg viewBox="0 0 100 80" className="absolute left-1/2 top-[6%] w-[16%] -translate-x-1/2 opacity-50" aria-hidden>
+              <path d="M8 70 L4 18 L28 40 L50 6 L72 40 L96 18 L92 70 Z" fill="rgba(253,224,71,0.5)" stroke="rgba(254,249,195,0.9)" strokeWidth={5} strokeLinejoin="round" />
+            </svg>
+          )}
           {IMPACTS.slice(0, strikes).map((at, i) => (
             <Strike key={i} at={at} seed={seed + i * 7919} />
           ))}

@@ -5,9 +5,13 @@ import {
   cloudConfigured,
   ensurePlayer,
   fetchLeaderboard,
+  fetchDuelOpponents,
   fetchSave,
   forgetAccount,
   getMyName,
+  getMyAvatar,
+  saveMyAvatar,
+  uploadAvatar,
   getSession,
   hasStoredSession,
   keepDataOnDevice,
@@ -30,6 +34,7 @@ import {
   type LeaderboardRow,
 } from '../lib/cloud';
 import { compare, fingerprint, readMark, writeMark, clearMark, type Verdict } from '../lib/syncMark';
+import { photoToAvatar, readCachedAvatar, writeCachedAvatar } from '../lib/avatar';
 
 /** How long to sit on changes before pushing, so a fast set doesn't fire a write per rep. */
 const SYNC_DEBOUNCE_MS = 4000;
@@ -83,6 +88,8 @@ export function useCloud(
    * every sign-in: the name simply hadn't arrived yet.
    */
   const [name, setName] = useState<string | null | undefined>(undefined);
+  /** What's on the player's avatar (see src/lib/avatar.ts) — this device's copy until the server answers. */
+  const [avatar, setAvatarState] = useState<string | null>(readCachedAvatar);
   const [ready, setReady] = useState(!cloudConfigured());
   const [syncedAt, setSyncedAt] = useState<number | null>(null);
   const [remember, setRememberState] = useState(rememberDevice);
@@ -186,6 +193,12 @@ export function useCloud(
       }
       if (!alive) return;
       setName(current);
+      // The avatar alongside, on its own: a server without supabase/avatars.sql just says none.
+      void getMyAvatar().then((a) => {
+        if (!alive) return;
+        setAvatarState(a);
+        writeCachedAvatar(a);
+      });
       // Every confirmed session refreshes the greeting for next time, including one restored
       // from storage — so a device stays recognised without ever retyping the address.
       const email = session.user.email;
@@ -402,11 +415,42 @@ export function useCloud(
     return err;
   }, []);
 
+  /** Sets the avatar to a gallery pick or back to the letter (null). Shown at once, undone if the server refuses. */
+  const setAvatar = useCallback(
+    async (value: string | null) => {
+      const before = avatar;
+      setAvatarState(value);
+      const err = await saveMyAvatar(value);
+      if (err) setAvatarState(before);
+      else writeCachedAvatar(value);
+      return err;
+    },
+    [avatar],
+  );
+
+  /** Makes a photo off the phone the avatar: cut to a square, uploaded, set. */
+  const uploadAvatarPhoto = useCallback(
+    async (file: File) => {
+      let photo: Blob;
+      try {
+        photo = await photoToAvatar(file);
+      } catch (e) {
+        return { message: e instanceof Error ? e.message : 'Не получилось обработать картинку.' };
+      }
+      const res = await uploadAvatar(photo);
+      if ('error' in res) return res.error;
+      return setAvatar(res.url);
+    },
+    [setAvatar],
+  );
+
   /** `forget` also drops the remembered address, for a device that isn't yours. */
   const logout = useCallback(async (forget = false) => {
     await signOut(forget);
     setSession(null);
     setName(undefined);
+    setAvatarState(null);
+    writeCachedAvatar(null);
     setUnreachable(false);
     setConflict(null);
     // The next account has to be compared from scratch before anything of its own goes up.
@@ -441,6 +485,9 @@ export function useCloud(
       ready,
       session,
       name,
+      avatar,
+      setAvatar,
+      uploadAvatarPhoto,
       syncedAt,
       remember,
       lastAccount,
@@ -462,11 +509,15 @@ export function useCloud(
       syncNow,
       fetchSave,
       fetchLeaderboard,
+      fetchDuelOpponents,
     }),
     [
       ready,
       session,
       name,
+      avatar,
+      setAvatar,
+      uploadAvatarPhoto,
       syncedAt,
       remember,
       lastAccount,

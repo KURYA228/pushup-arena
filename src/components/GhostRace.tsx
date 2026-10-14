@@ -48,7 +48,8 @@ function GhostSprite({ smug, calm }: { smug: boolean; calm: boolean | null }) {
  * The race against your record. One track, two runners: the ghost of your best run floats along
  * the top, you run along the bottom. Pass it and it bursts into mist.
  */
-export function GhostRace({ you, ghost, best }: { you: number; ghost: number; best: number }) {
+/** `label`: whose run the ghost is — your record by default, an opponent's in a 1 на 1. */
+export function GhostRace({ you, ghost, best, label = 'Призрак рекорда' }: { you: number; ghost: number; best: number; label?: string }) {
   const calm = useReducedMotion();
   const scale = Math.max(best, you, 1);
   const ahead = you - ghost;
@@ -68,7 +69,7 @@ export function GhostRace({ you, ghost, best }: { you: number; ghost: number; be
   return (
     <div className="relative mb-5 overflow-hidden rounded-2xl border border-arena-border bg-arena-surface px-3 pb-3 pt-2 text-left">
       <div className="flex items-center justify-between text-[11px]">
-        <span className="text-arena-text-dim">Призрак рекорда · {best}</span>
+        <span className="text-arena-text-dim">{label} · {best}</span>
         <motion.span
           key={Math.sign(ahead)}
           initial={calm ? false : { scale: 1.3 }}

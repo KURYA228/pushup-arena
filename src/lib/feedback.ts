@@ -124,6 +124,15 @@ const SAMPLES = {
   hurt: 'sfx/hurt.m4a',
   // The turtles' shout as Shredder goes down.
   cowabunga: 'sfx/cowabunga.m4a',
+  // The little Mega Knight's shout on the King's stage.
+  megaKnight: 'sfx/megaknight.m4a',
+  // Clash Royale's goblin taunt, "mi-mi-mi": the King's, when he's drunk his elixir and is whole again.
+  mimimi: 'sfx/mimimi.m4a',
+  // Po's "Скидыщ!", for Tai Lung's stage.
+  skidysh: 'sfx/skidysh.m4a',
+  // Kiryukha's words in the finale, voiced: on the way into his fight, and on a rerun.
+  kiryukhaTalk: 'sfx/kiryukha-talk.m4a',
+  kiryukhaTalkRerun: 'sfx/kiryukha-talk-2.m4a',
   // Lines a boss says as he walks out, one file each under sfx/lines/.
   lineKrabs: 'sfx/lines/krabs.m4a',
   lineEnder: 'sfx/lines/ender.m4a',
@@ -136,13 +145,17 @@ const SAMPLES = {
   lineSkipper: 'sfx/lines/skipper.m4a',
   lineTsar: 'sfx/lines/tsar.m4a',
   lineShredder: 'sfx/lines/shredder.m4a',
+  lineKing: 'sfx/lines/king.m4a',
+  lineGoblin: 'sfx/lines/goblin.m4a',
+  lineTaiLung: 'sfx/lines/tailung.m4a',
+  lineUltron: 'sfx/lines/ultron.m4a',
 } as const;
 type SampleName = keyof typeof SAMPLES;
 
 /** The ones a stage can name as its rep cue; the rest belong to a particular moment. */
 export type RepSample = Extract<SampleName, 'coins' | 'oink' | 'hurt'>;
 /** Every rep cue a stage can ask for: a recording, or one synthesised here. */
-export type RepCue = RepSample | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace' | 'katana';
+export type RepCue = RepSample | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace' | 'katana' | 'cannon' | 'pumpkin' | 'belly' | 'metal' | 'gladiator';
 /** A boss's spoken line, played once as he walks out — see `playBossEncounter`. */
 export type BossLine = Extract<SampleName, `line${string}`>;
 
@@ -708,6 +721,129 @@ function maceClang(c: AudioContext, peak: number) {
   }
 }
 
+/**
+ * The King's tower cannon, from Clash Royale: a short, round "bomp" rather than a war-film boom —
+ * the arena is a cartoon. A puff of air out of the muzzle, a low thump that drops in pitch for
+ * the shot's weight, and a wooden knock on top for the carriage kicking back. Every few shots
+ * the ball lands with a dull thud a beat later. Under a quarter of a second, re-rolled every call.
+ */
+function towerCannon(c: AudioContext, peak: number) {
+  const k = 0.92 + Math.random() * 0.16;
+  // The muzzle puff.
+  swish(c, 1600 * k, 400 * k, 0, 0.09, 0.9, peak * 0.45);
+  // The shot: a round low thump.
+  sweep(c, 190 * k, 48, 0, 0.16, peak, 'sine');
+  sweep(c, 95 * k, 40, 0, 0.2, peak * 0.6, 'triangle');
+  // The carriage kicking back.
+  hit(c, 900 * k, 4, 0.005, 0.04, peak * 0.6);
+  hit(c, 2400 * k, 2, 0, 0.02, peak * 0.35);
+  // Now and then, the ball landing.
+  if (Math.random() < 0.3) hit(c, 300 * k, 1.5, 0.15, 0.06, peak * 0.5);
+}
+
+/**
+ * The Green Goblin's pumpkin bomb: a hiss of the fuse, a quick tick as it lands, then a short
+ * fat pop — a bang with a low thump under it — and a fizz of sparks after. Round and cartoonish
+ * rather than a real explosion, and under a third of a second so it keeps up with a set. Every
+ * few blows the bomb goes off with a little extra crackle. Re-rolled every call.
+ */
+function pumpkinBomb(c: AudioContext, peak: number) {
+  const k = 0.9 + Math.random() * 0.2;
+  // The fuse.
+  swish(c, 5200 * k, 7200 * k, 0, 0.07, 4, peak * 0.22);
+  const at = 0.07;
+  // Landing.
+  hit(c, 3000 * k, 2, at, 0.012, peak * 0.4);
+  // The pop: a burst of noise and a thump dropping away.
+  hit(c, 900 * k, 0.7, at + 0.01, 0.1, peak * 0.9);
+  sweep(c, 170 * k, 45, at + 0.01, 0.18, peak, 'sine');
+  sweep(c, 420 * k, 120, at + 0.01, 0.08, peak * 0.35, 'square');
+  // Sparks fizzing off it.
+  swish(c, 6000 * k, 2500 * k, at + 0.05, 0.16, 1.4, peak * 0.25);
+  if (Math.random() < 0.35) {
+    for (let i = 0; i < 4; i += 1) hit(c, 4000 + Math.random() * 3000, 3, at + 0.08 + i * 0.035, 0.012, peak * 0.25);
+  }
+}
+
+/**
+ * A blow on Tai Lung, the way Po beats him: a big soft belly. Not a slap and not a thud but a
+ * "bwoing" — a muffled whump of a fist sinking into something round, then the belly bouncing it
+ * back, a low tone that springs up in pitch, sags and wobbles out like a jelly settling. Under a
+ * third of a second, re-rolled every call.
+ */
+function bellyBounce(c: AudioContext, peak: number) {
+  const k = 0.9 + Math.random() * 0.2;
+  const t0 = c.currentTime;
+  // The fist sinking in: soft, low, no click.
+  const muffle = c.createBiquadFilter();
+  muffle.type = 'lowpass';
+  muffle.frequency.value = 420 * k;
+  const thud = c.createBufferSource();
+  thud.buffer = noise(c);
+  const tg = c.createGain();
+  tg.gain.setValueAtTime(0.0001, t0);
+  tg.gain.exponentialRampToValueAtTime(peak * 0.9, t0 + 0.008);
+  tg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.09);
+  thud.connect(muffle).connect(tg).connect(output(c));
+  thud.start(t0);
+  thud.stop(t0 + 0.1);
+  // The bounce: a low tone springing up, sagging back and wobbling out.
+  const osc = c.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(70 * k, t0 + 0.02);
+  osc.frequency.exponentialRampToValueAtTime(190 * k, t0 + 0.07);
+  osc.frequency.exponentialRampToValueAtTime(110 * k, t0 + 0.16);
+  osc.frequency.exponentialRampToValueAtTime(135 * k, t0 + 0.21);
+  osc.frequency.exponentialRampToValueAtTime(100 * k, t0 + 0.28);
+  const og = c.createGain();
+  og.gain.setValueAtTime(0.0001, t0 + 0.02);
+  og.gain.exponentialRampToValueAtTime(peak, t0 + 0.04);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+  osc.connect(og).connect(output(c));
+  osc.start(t0 + 0.02);
+  osc.stop(t0 + 0.32);
+  // A touch of the octave on top, so a phone speaker can hear the "boing" too.
+  sweep(c, 280 * k, 380 * k, 0.03, 0.12, peak * 0.25, 'triangle');
+}
+
+/**
+ * A blow on Ultron: a length of iron bar slamming into steel plate. A hard bright crack for the
+ * hit, then the clang — the partials of a struck metal bar (1 : 2.76 : 5.40 : 8.93, which is why
+ * it sounds like a pipe and not a bell), each a pair of tones a few hertz apart so the ring beats
+ * and shimmers — dying away over a third of a second. Every few blows the bar hits flatter and
+ * rings a little longer. Re-rolled every call.
+ */
+function metalClang(c: AudioContext, peak: number) {
+  const k = 0.92 + Math.random() * 0.16;
+  const long = Math.random() < 0.3 ? 1.5 : 1;
+  hit(c, 4200 * k, 1.2, 0, 0.02, peak * 0.9);
+  hit(c, 1500 * k, 1.5, 0, 0.04, peak * 0.5);
+  const base = 520 * k;
+  for (const [ratio, gain, dur] of [
+    [1, 0.5, 0.34],
+    [2.76, 0.38, 0.26],
+    [5.4, 0.24, 0.18],
+    [8.93, 0.14, 0.12],
+  ] as const) {
+    const f = base * ratio;
+    sweep(c, f, f * 0.996, 0.005, dur * long, peak * gain, 'sine');
+    sweep(c, f + 5, (f + 5) * 0.996, 0.005, dur * long, peak * gain * 0.7, 'sine');
+  }
+}
+
+/**
+ * A blow on Kiryukha: a fist into a wall of muscle. Not a crack but a heavy, dull "thwump" —
+ * a low thump with the meat of it in the low mids — and the grit of the arena sand kicked up
+ * under it. Under a quarter of a second, re-rolled every call.
+ */
+function gladiatorPunch(c: AudioContext, peak: number) {
+  const k = 0.9 + Math.random() * 0.2;
+  hit(c, 260 * k, 0.9, 0, 0.09, peak);
+  sweep(c, 120 * k, 50, 0, 0.16, peak * 0.9, 'sine');
+  hit(c, 900 * k, 1.4, 0.005, 0.04, peak * 0.35);
+  swish(c, 3500 * k, 1800 * k, 0.03, 0.12, 1, peak * 0.15);
+}
+
 /** A counted rep. Crits get their own cue so you can hear one without looking at the screen. */
 /** `double`: Shredder's katana — both blades this time; left out, it's rolled here. */
 export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepCue, double?: boolean) {
@@ -730,6 +866,11 @@ export function playRep(prefs: FeedbackPrefs, crit = false, sound?: RepCue, doub
       else if (sound === 'buzzer') joyBuzzer(c, 0.3);
       else if (sound === 'mace') maceClang(c, 0.3);
       else if (sound === 'katana') katanaSlash(c, 0.3, double);
+      else if (sound === 'cannon') towerCannon(c, 0.32);
+      else if (sound === 'pumpkin') pumpkinBomb(c, 0.32);
+      else if (sound === 'belly') bellyBounce(c, 0.4);
+      else if (sound === 'metal') metalClang(c, 0.32);
+      else if (sound === 'gladiator') gladiatorPunch(c, 0.4);
       else if (sound) {
         loadSample(c, sound);
         if (!playSample(c, sound, 0.5)) {
@@ -859,6 +1000,415 @@ export function playPoof(prefs: FeedbackPrefs) {
   swish(c, 1600, 180, 0.05, 0.45, 0.8, 0.45);
   sweep(c, 140, 60, 0.05, 0.25, 0.35, 'sine');
   sweep(c, 900, 1400, 0, 0.08, 0.08, 'triangle');
+}
+
+/* ------------------------------- Король ------------------------------- */
+
+/**
+ * The King's heal, Clash Royale style: a glug of elixir — a bubbly "bloop" sliding up — and a
+ * soft rising sparkle as the heal spell settles on him.
+ */
+export function playElixirHeal(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 260, 620, 0, 0.12, 0.22, 'sine');
+  sweep(c, 380, 900, 0.09, 0.1, 0.16, 'sine');
+  for (let i = 0; i < 4; i += 1) {
+    const f = 1050 * 2 ** (i * 4 / 12);
+    sweep(c, f, f * 1.01, 0.16 + i * 0.06, 0.22, 0.07, 'triangle');
+  }
+}
+
+/**
+ * The little Mega Knight's turn: his shout as he leaps — the recording, fetched while the King's
+ * stage is up (preloadBossCues); the speech synthesiser bellows it only if the file never made
+ * it — and the slam when he lands, `landAt` seconds later.
+ */
+export function playMegaKnight(prefs: FeedbackPrefs, landAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) {
+    speak('Mega Knight!', 0.85, 0.1);
+    return;
+  }
+  loadSample(c, 'megaKnight');
+  if (!playSample(c, 'megaKnight', 0.9, { exact: true })) speak('Mega Knight!', 0.85, 0.1);
+  sweep(c, 140, 38, landAt, 0.4, 0.55, 'sine');
+  hit(c, 300, 0.9, landAt, 0.3, 0.45);
+  swish(c, 1400, 250, landAt, 0.5, 0.8, 0.3);
+}
+
+/**
+ * His tower coming down: a deep blast, stone grinding and tumbling, and then the three crowns
+ * chiming in one after another, each a step higher.
+ */
+export function playTowerFall(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 120, 35, 0, 0.7, 0.6, 'sine');
+  hit(c, 400, 0.8, 0, 0.5, 0.5);
+  swish(c, 1800, 200, 0.05, 0.9, 0.7, 0.35);
+  for (let i = 0; i < 6; i += 1) hit(c, 500 + Math.random() * 900, 3, 0.25 + i * 0.09 + Math.random() * 0.04, 0.05, 0.2);
+  [784, 988, 1175].forEach((f, i) => {
+    const at = 0.95 + i * 0.32;
+    sweep(c, f, f, at, 0.45, 0.16, 'triangle');
+    sweep(c, f * 2, f * 2, at, 0.3, 0.06, 'sine');
+  });
+}
+
+/* --------------------------- Зелёный Гоблин --------------------------- */
+
+/** His glider screaming past: a jet's roar sweeping up and away, panned by the pitch alone. */
+export function playGliderPass(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 600, 3200, 0, 0.5, 1.2, 0.35);
+  swish(c, 3200, 900, 0.45, 0.6, 1.2, 0.25);
+  sweep(c, 180, 320, 0, 0.5, 0.12, 'sawtooth');
+  sweep(c, 320, 140, 0.5, 0.5, 0.08, 'sawtooth');
+}
+
+/** A pumpkin bomb landing for real: the fuse, then a proper bang and a long fizz. */
+export function playPumpkinBlast(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 5000, 7500, 0, 0.12, 4, 0.12);
+  hit(c, 700, 0.6, 0.12, 0.35, 0.6);
+  sweep(c, 150, 35, 0.12, 0.5, 0.6, 'sine');
+  swish(c, 6000, 1500, 0.2, 0.6, 1.2, 0.2);
+}
+
+/**
+ * The Goblin's own bomb taking him out: the fuse hissing with a tick that speeds up, then at
+ * `boomAt` seconds a big round bang — deeper and longer than his everyday pumpkins — and a long
+ * crackle of the shell coming down.
+ */
+export function playGoblinBoom(prefs: FeedbackPrefs, boomAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 5000, 7000, 0, boomAt, 4, 0.12);
+  for (const at of [0.1, 0.35, 0.55, 0.7, 0.8, 0.86]) if (at < boomAt) sweep(c, 1600, 1600, at, 0.04, 0.12, 'square');
+  hit(c, 500, 0.5, boomAt, 0.7, 0.75);
+  sweep(c, 120, 28, boomAt, 1, 0.8, 'sine');
+  swish(c, 3000, 300, boomAt + 0.05, 1.2, 0.8, 0.3);
+  for (let i = 0; i < 8; i += 1) hit(c, 1500 + Math.random() * 3000, 3, boomAt + 0.3 + i * 0.09 + Math.random() * 0.05, 0.03, 0.12);
+}
+
+/** Spider-Man's web shooter: a sharp "thwip" — a pinched little zip up in pitch. */
+export function playThwip(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 1800, 7000, 0, 0.09, 3, 0.35);
+  sweep(c, 900, 2600, 0, 0.07, 0.08, 'triangle');
+}
+
+/* ------------------------------- Тай Лунг ------------------------------- */
+
+/** Po's belly-bump in a raid on Tai Lung: just the "bwoing", no shout. */
+export function playBellyBump(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (c) bellyBounce(c, 0.45);
+}
+
+/** One of the Furious Five landing a blow: a whoosh into a hard, bright smack. */
+export function playKungFuHit(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 800, 3200, 0, 0.1, 1.2, 0.25);
+  hit(c, 1800, 1, 0.09, 0.05, 0.5);
+  sweep(c, 220, 80, 0.09, 0.12, 0.4, 'sine');
+}
+
+/**
+ * Po's "Скидыщ!" at `atSec` from now — the recording (fetched while Tai Lung's stage is up), the
+ * speech synthesiser only if it never arrived — with the belly's "bwoing" under it when `belly`.
+ */
+export function playSkidysh(prefs: FeedbackPrefs, atSec: number, belly = true) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) {
+    window.setTimeout(() => speak('Skadoosh!', 1, 1.3), atSec * 1000);
+    return;
+  }
+  loadSample(c, 'skidysh');
+  window.setTimeout(() => {
+    if (belly) bellyBounce(c, 0.45);
+    if (!playSample(c, 'skidysh', 0.9, { exact: true })) speak('Skadoosh!', 1, 1.3);
+  }, atSec * 1000);
+}
+
+/**
+ * Po's firework chair: the rockets' fizz and a rising whistle as it streaks over, and at
+ * `burstAt` the bang and a crackle of the firework opening.
+ */
+export function playFireworkChair(prefs: FeedbackPrefs, burstAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 3000, 5000, 0, burstAt, 3, 0.12);
+  sweep(c, 700, 2400, 0, burstAt, 0.06, 'sine');
+  hit(c, 600, 0.6, burstAt, 0.4, 0.5);
+  sweep(c, 140, 40, burstAt, 0.5, 0.45, 'sine');
+  for (let i = 0; i < 12; i += 1) hit(c, 2500 + Math.random() * 4000, 3, burstAt + 0.15 + Math.random() * 0.7, 0.02, 0.12);
+}
+
+/** The Dragon Scroll: a papery swish as it unrolls and a bright chime as the gold catches the light. */
+export function playScroll(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 2500, 6000, 0, 0.35, 1, 0.2);
+  [1319, 1760, 2637].forEach((f, i) => sweep(c, f, f, 0.3 + i * 0.07, 0.6, 0.07, 'sine'));
+}
+
+/** Tai Lung snapping up a dumpling: a soft pop as it lands and two quick chomps. */
+export function playNom(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 500, 900, 0, 0.06, 0.12, 'sine');
+  for (const at of [0.08, 0.2]) {
+    hit(c, 700, 1.2, at, 0.04, 0.3);
+    sweep(c, 180, 110, at, 0.06, 0.2, 'sine');
+  }
+}
+
+/**
+ * The Wuxi finger hold: a deep gong as the little finger comes down, a rising golden shimmer,
+ * and at `boomAt` the blast rolling out — a low boom with a long airy wash behind it.
+ */
+export function playWuxi(prefs: FeedbackPrefs, boomAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (const [ratio, g] of [[1, 0.35], [2.4, 0.18], [3.9, 0.1]] as const) sweep(c, 110 * ratio, 108 * ratio, 0, 1.6, g, 'sine');
+  for (let i = 0; i < 8; i += 1) {
+    const f = 900 * 2 ** (i / 6);
+    sweep(c, f, f * 1.02, 0.2 + i * (boomAt - 0.25) / 8, 0.3, 0.05, 'triangle');
+  }
+  sweep(c, 90, 25, boomAt, 1.4, 0.7, 'sine');
+  hit(c, 300, 0.5, boomAt, 0.6, 0.5);
+  swish(c, 4000, 400, boomAt, 1.6, 0.7, 0.3);
+}
+
+/* -------------------------------- Альтрон -------------------------------- */
+
+/** A drone's push-up counted out: a short robotic blip, a step higher each time. */
+export function playDroneBlip(prefs: FeedbackPrefs, n: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const f = 520 * 2 ** (Math.min(n, 8) / 12);
+  sweep(c, f, f, 0, 0.07, 0.08, 'square');
+  sweep(c, f * 1.5, f * 1.5, 0.07, 0.05, 0.05, 'square');
+}
+
+/** Puppet strings dropping onto him and snapping: a slack twang, then three sharp plinks. */
+export function playStringSnap(prefs: FeedbackPrefs, snapAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 180, 160, 0, 0.5, 0.08, 'triangle');
+  for (let i = 0; i < 3; i += 1) {
+    const at = snapAt + i * 0.07;
+    hit(c, 5000, 4, at, 0.015, 0.2);
+    sweep(c, 1400 + i * 300, 700, at, 0.2, 0.08, 'triangle');
+  }
+}
+
+/** Iron Man's repulsor: a rising whine as it charges, then at `fireAt` the blast — a bright zap and a thump. */
+export function playRepulsor(prefs: FeedbackPrefs, fireAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  sweep(c, 300, 1800, Math.max(0, fireAt - 0.5), 0.5, 0.06, 'sawtooth');
+  sweep(c, 2400, 600, fireAt, 0.25, 0.18, 'square');
+  swish(c, 6000, 1500, fireAt, 0.3, 1.5, 0.3);
+  sweep(c, 160, 50, fireAt + 0.05, 0.25, 0.4, 'sine');
+}
+
+/**
+ * Captain America's shield: the whoosh of it spinning out, the clang off Ultron at `hitAt` —
+ * the vibranium "ting" that rings on and on — and the whoosh of it coming back.
+ */
+export function playShieldThrow(prefs: FeedbackPrefs, hitAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 700, 2200, 0, hitAt, 1.5, 0.22);
+  hit(c, 3500, 1.2, hitAt, 0.02, 0.6);
+  for (const [f, g, d] of [[1240, 0.22, 0.9], [2610, 0.14, 0.7], [4120, 0.08, 0.5]] as const) {
+    sweep(c, f, f * 0.998, hitAt, d, g, 'sine');
+    sweep(c, f + 4, (f + 4) * 0.998, hitAt, d, g * 0.6, 'sine');
+  }
+  swish(c, 2200, 700, hitAt + 0.15, hitAt * 0.9, 1.5, 0.18);
+}
+
+/** Thor's hammer: the whoosh of it flying in, a thunderclap, and steel bursting apart. */
+export function playMjolnir(prefs: FeedbackPrefs, strikeAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 400, 2400, 0, strikeAt, 1.2, 0.3);
+  hit(c, 2500, 0.6, strikeAt, 0.15, 0.6);
+  hit(c, 300, 0.4, strikeAt + 0.05, 1.2, 0.55);
+  sweep(c, 80, 25, strikeAt, 1.4, 0.6, 'sine');
+  for (let i = 0; i < 10; i += 1) {
+    const f = 2000 + Math.random() * 4000;
+    sweep(c, f, f * 0.98, strikeAt + 0.1 + Math.random() * 0.6, 0.2, 0.06, 'sine');
+  }
+}
+
+/* -------------------------------- Финал -------------------------------- */
+
+/** Fetches Kiryukha's voiced lines ahead of the moment he speaks. */
+export function preloadKiryukhaTalk(intoFight: boolean) {
+  const c = audioContext();
+  if (c) loadSample(c, intoFight ? 'kiryukhaTalk' : 'kiryukhaTalkRerun');
+}
+
+/**
+ * Kiryukha speaking his lines in the finale, from the top — the version on the way into his
+ * fight, or the rerun's. Waits briefly for the file if it's still on its way; returns a function
+ * that silences it (skipping the scene).
+ */
+export function startKiryukhaTalk(prefs: FeedbackPrefs, intoFight: boolean): () => void {
+  if (!prefs.sound) return () => {};
+  const c = audioContext();
+  if (!c) return () => {};
+  const name = intoFight ? 'kiryukhaTalk' : 'kiryukhaTalkRerun';
+  loadSample(c, name);
+  let src: AudioBufferSourceNode | null = null;
+  let cancelled = false;
+  const startedAt = performance.now();
+  const attempt = () => {
+    if (cancelled) return;
+    const buffer = loaded.get(name);
+    if (buffer) {
+      src = c.createBufferSource();
+      src.buffer = buffer;
+      const gain = c.createGain();
+      gain.gain.value = 0.95;
+      src.connect(gain).connect(output(c));
+      // Started late if it was still loading: skip ahead, so the words keep to the text.
+      const late = (performance.now() - startedAt) / 1000;
+      src.start(c.currentTime, late);
+    } else if (!failed.has(name) && performance.now() - startedAt < 1500) window.setTimeout(attempt, 80);
+  };
+  attempt();
+  return () => {
+    cancelled = true;
+    try {
+      src?.stop();
+    } catch {
+      // Already finished.
+    }
+  };
+}
+
+/* -------------------------------- Кирюха -------------------------------- */
+
+/** The crowd of the arena: a swell of roaring noise, rising and settling. */
+function crowd(c: AudioContext, at: number, dur: number, peak: number) {
+  swish(c, 700, 1200, at, dur * 0.5, 0.5, peak);
+  swish(c, 1200, 600, at + dur * 0.45, dur * 0.55, 0.5, peak * 0.8);
+}
+
+/** A chariot thundering past: galloping hooves, the wheels' rumble, and the crowd roaring it on. */
+export function playChariot(prefs: FeedbackPrefs, dur: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let t = 0; t < dur; t += 0.18) {
+    hit(c, 500, 1.5, t, 0.04, 0.18);
+    hit(c, 420, 1.5, t + 0.07, 0.04, 0.14);
+  }
+  swish(c, 300, 600, 0, dur, 0.7, 0.16);
+  crowd(c, dur * 0.3, dur * 0.7, 0.18);
+}
+
+/** The lion: a big roar — and then, once it has seen who it's roaring at, a small meow. */
+export function playLionGag(prefs: FeedbackPrefs, roarAt: number, meowAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  swish(c, 400, 160, roarAt, 1, 0.9, 0.45);
+  sweep(c, 140, 70, roarAt, 1, 0.3, 'sawtooth');
+  sweep(c, 700, 1100, meowAt, 0.12, 0.1, 'triangle');
+  sweep(c, 1100, 600, meowAt + 0.12, 0.25, 0.1, 'triangle');
+}
+
+/** The crowd's cameras going off: a ragged burst of shutter clicks and flash whines. */
+export function playShutters(prefs: FeedbackPrefs, count: number, over: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < count; i += 1) {
+    const at = Math.random() * over;
+    hit(c, 3000, 2, at, 0.02, 0.2);
+    hit(c, 1800, 2, at + 0.04, 0.02, 0.12);
+  }
+  crowd(c, 0.1, over + 0.4, 0.16);
+}
+
+/** A volley of arrows: whistles coming down, then little "tings" as they bounce off him. */
+export function playArrowVolley(prefs: FeedbackPrefs, landAt: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (let i = 0; i < 6; i += 1) {
+    const at = i * 0.06;
+    sweep(c, 2400 + Math.random() * 600, 900, at, landAt - at, 0.04, 'sine');
+    const ting = landAt + Math.random() * 0.4;
+    hit(c, 5000, 3, ting, 0.015, 0.15);
+    sweep(c, 3000 + Math.random() * 1500, 2800, ting, 0.15, 0.05, 'sine');
+  }
+}
+
+/** The spartans' war cry: three short, deep "АУ!" barks in time with their steps. */
+export function playSpartanCry(prefs: FeedbackPrefs, beats: number[]) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  for (const at of beats) {
+    const band = c.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = 650;
+    band.Q.value = 1.2;
+    const g = c.createGain();
+    const t0 = c.currentTime + at;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.35, t0 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
+    band.connect(g).connect(output(c));
+    for (const f of [110, 113, 165]) {
+      const o = c.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f, t0);
+      o.frequency.exponentialRampToValueAtTime(f * 0.8, t0 + 0.28);
+      o.connect(band);
+      o.start(t0);
+      o.stop(t0 + 0.3);
+    }
+    hit(c, 160, 1, at, 0.08, 0.3);
+  }
+}
+
+/** The new master of the arena crowned: a fanfare over the crowd going wild. */
+export function playCrowned(prefs: FeedbackPrefs, at: number) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  [523, 659, 784, 1047].forEach((f, i) => sweep(c, f, f, at + i * 0.12, i === 3 ? 0.8 : 0.18, 0.12, 'triangle'));
+  crowd(c, at + 0.2, 2.2, 0.35);
 }
 
 /* --------------------------- Эндер-дракон --------------------------- */
@@ -1600,12 +2150,21 @@ export function bossLineLevel(): number | null {
  * Starts fetching what a boss's entrance needs — the "Boss Fight" call and his line — ahead of
  * time, so they're in memory by the time he walks out. Safe to call as often as you like.
  */
-export function preloadBossCues(line?: BossLine, extra?: SampleName) {
+export function preloadBossCues(line?: BossLine, ...extras: SampleName[]) {
   const c = ctx;
   if (!c) return;
   loadSample(c, 'bossfight');
   if (line) loadSample(c, line);
-  if (extra) loadSample(c, extra);
+  for (const extra of extras) loadSample(c, extra);
+}
+
+/** The goblin's "mi-mi-mi" taunt, from Clash Royale. Nothing if the recording isn't in yet. */
+export function playMimimi(prefs: FeedbackPrefs) {
+  if (!prefs.sound) return;
+  const c = audioContext();
+  if (!c) return;
+  loadSample(c, 'mimimi');
+  playSample(c, 'mimimi', 0.85, { exact: true });
 }
 
 /** When a boss's own line starts: after the "Boss" call has had its say. */

@@ -16,9 +16,9 @@ export interface MinionDef {
 }
 
 /** Named rep cues a stage can ask for instead of the default. */
-export type HitSound = 'coins' | 'oink' | 'hurt' | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace' | 'katana';
+export type HitSound = 'coins' | 'oink' | 'hurt' | 'freeze' | 'slap' | 'claws' | 'staff' | 'honk' | 'buzzer' | 'mace' | 'katana' | 'cannon' | 'pumpkin' | 'belly' | 'metal' | 'gladiator';
 /** Recorded lines a boss can say as he walks out (files under `public/sfx/lines/`). */
-export type BossLine = 'lineKrabs' | 'linePig' | 'lineGru' | 'lineSkipper' | 'lineNicole' | 'lineRobin' | 'lineFreddy' | 'lineJoker' | 'lineEnder' | 'lineTsar' | 'lineShredder';
+export type BossLine = 'lineKrabs' | 'linePig' | 'lineGru' | 'lineSkipper' | 'lineNicole' | 'lineRobin' | 'lineFreddy' | 'lineJoker' | 'lineEnder' | 'lineTsar' | 'lineShredder' | 'lineKing' | 'lineGoblin' | 'lineTaiLung' | 'lineUltron';
 
 export interface BossDef {
   /**
@@ -307,34 +307,46 @@ const RAW: RawBoss[] = [
     minions: ['Бибоп', 'Рокстеди', 'Бакстер Стокман'],
   },
   {
+    // Id kept; Clash Royale's arena opens.
     id: 'worldbreaker',
-    name: 'Жнец',
-    nameGenitive: 'Жнеца',
-    title: 'Ведёт учёт',
-    phrase: 'Я не тороплюсь. Ты придёшь сам.',
+    name: 'Король',
+    nameGenitive: 'Короля',
+    title: 'Не выходит из башни',
+    phrase: 'Хи-хи-ха-ха!',
     budget: 3300,
     baseDamage: 10,
     critChance: 0.23,
     critMultiplier: 3,
-    color: '#c2410c',
+    color: '#c53030',
     icon: '11-worldbreaker.jpg',
-    abilities: [{ kind: 'bulwark', value: 0.45 }, { kind: 'noStop', value: 1 }],
-    minions: ['Учётчик', 'Косарь', 'Молчун'],
+    // His tower's cannon on every rep (synthesised, `towerCannon` in src/lib/feedback.ts); his
+    // "hee-hee-ha-ha" emote as he walks out.
+    hitSound: 'cannon',
+    line: 'lineKing',
+    // He doesn't wait to be hit: ten seconds without a blow and he drinks his elixir and is
+    // whole again (KingFx's elixir bar). He goes down in one set or not at all.
+    abilities: [{ kind: 'bulwark', value: 0.45 }, { kind: 'elixir', value: 10 }],
+    minions: ['Король варваров', 'Валькирия', 'П.Е.К.К.А'],
   },
   {
+    // Id kept; Spider-Man's rogues move in.
     id: 'apex',
-    name: 'Погибель',
-    nameGenitive: 'Погибели',
-    title: 'После неё не встают',
-    phrase: 'Досюда добираются многие. Обратно — своим ходом никто.',
+    name: 'Зелёный Гоблин',
+    nameGenitive: 'Зелёного Гоблина',
+    title: 'Тыквенные бомбы наготове',
+    phrase: 'Мэри Джейн и я... у нас будет адски весело!',
     budget: 4000,
     baseDamage: 10,
     critChance: 0.25,
     critMultiplier: 3,
-    color: '#d4af37',
+    color: '#65a30d',
     icon: '12-apex.jpg',
+    // A pumpkin bomb going off on every rep (synthesised, `pumpkinBomb` in src/lib/feedback.ts);
+    // the Spider-Man 2.0 meme song as he walks out, cut after its first phrase.
+    hitSound: 'pumpkin',
+    line: 'lineGoblin',
     abilities: [{ kind: 'armor', value: 0.3 }, { kind: 'evenOnly', value: 1 }],
-    minions: ['Предвестник', 'Плакальщик', 'Могильщик'],
+    minions: ['Носорог', 'Стервятник', 'Доктор Осьминог'],
   },
   {
     // Id kept; the End opens.
@@ -356,40 +368,51 @@ const RAW: RawBoss[] = [
     minions: ['Зомби', 'Скелет', 'Крипер'],
   },
   {
+    // Id kept; the Valley of Peace opens.
     id: 'threshold',
-    name: 'Отказ',
-    nameGenitive: 'Отказа',
-    title: 'То, чем кончается каждый подход',
-    phrase: 'Я не соперник. Я то, что случится с тобой на середине.',
+    name: 'Тай Лунг',
+    // Masculine, but a foreign name ending in a consonant cluster — «подчинённый Тай Лунга».
+    nameGenitive: 'Тай Лунга',
+    title: 'Двадцать лет в тюрьме Чор-Гом',
+    phrase: 'Угвей — тупая старая черепаха.',
     budget: 5700,
     baseDamage: 10,
     critChance: 0.27,
     critMultiplier: 3.2,
-    color: '#6d28d9',
+    color: '#d97706',
     icon: '14-threshold.jpg',
+    // Every rep lands like Po's belly bouncing him back (synthesised, `bellyBounce` in
+    // src/lib/feedback.ts); his "twenty years I rotted in prison" as he walks out.
+    hitSound: 'belly',
+    line: 'lineTaiLung',
     // Regeneration moved here from the ninth stage when the tsar got abilities of his own.
     abilities: [{ kind: 'regen', value: 0.015 }, { kind: 'bloodDebt', value: 0.2 }],
-    minions: ['Дрожь', 'Судорога', 'Жжение'],
+    minions: ['Тигрица', 'Шифу', 'По'],
   },
   {
+    // Id kept; Ultron takes over.
     id: 'absolute',
-    name: 'Апекс',
-    nameGenitive: 'Апекса',
-    title: 'Выше нет ничего',
-    phrase: 'Я — твой потолок. И ты его уже видишь.',
+    name: 'Альтрон',
+    nameGenitive: 'Альтрона',
+    title: 'Нет на мне ниточек',
+    phrase: 'В чём смысл человечества, остановившегося в развитии?',
     budget: 6800,
     baseDamage: 10,
     critChance: 0.28,
     critMultiplier: 3.5,
-    color: '#f5f5f4',
+    color: '#dc2626',
     icon: '15-absolute.jpg',
+    // A blow on him rings like a length of iron striking steel (synthesised, `metalClang` in
+    // src/lib/feedback.ts); his monologue from the film as he walks out.
+    hitSound: 'metal',
+    line: 'lineUltron',
     abilities: [
       { kind: 'armor', value: 0.3 },
       { kind: 'critImmune', value: 1 },
       { kind: 'falseDeath', value: 10 },
       { kind: 'mirror', value: 1 },
     ],
-    minions: ['Претендент', 'Наследник', 'Тень Апекса'],
+    minions: ['Дрон Альтрона', 'Ртуть', 'Алая Ведьма'],
   },
   {
     // The host from the intro, and the last word: he comes out after the finale has broken the
@@ -408,7 +431,11 @@ const RAW: RawBoss[] = [
     critChance: 0.3,
     critMultiplier: 3.5,
     color: '#f59e0b',
-    icon: '16-kiryukha.webp',
+    icon: '16-kiryukha.jpg',
+    // A fist into a wall of muscle on every rep (synthesised, `gladiatorPunch` in src/lib/feedback.ts).
+    hitSound: 'gladiator',
+    // His photo is dark, a statue in the dusk: the lighter vignette keeps his helmet out of shadow.
+    artLight: true,
     abilities: [
       { kind: 'armor', value: 0.25 },
       { kind: 'critImmune', value: 1 },

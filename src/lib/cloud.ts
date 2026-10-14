@@ -4,6 +4,7 @@ import { weekKey } from './weekly';
 import { weekRepsNow } from './training';
 import { streakView, todayLocal } from './streak';
 import { isStale } from './season';
+import { DUEL_START } from '../data/duel';
 
 /**
  * Accounts and the leaderboard, over Supabase.
@@ -198,6 +199,12 @@ export interface LeaderboardRow {
   bestSet: number;
   /** Push-ups this week — the league. 0 for a count left over from an earlier week. */
   weekReps: number;
+  /** What's on their avatar (see `avatarSrc`); null for the letter. Null until supabase/avatars.sql is run. */
+  avatar: string | null;
+  /** 1 на 1 rating and record. DUEL_START and zeros until supabase/duels.sql is run. */
+  duelRating: number;
+  duelWins: number;
+  duelLosses: number;
 }
 
 /** `exists`: signing up with an address that already has an account — the form offers to sign in. */
@@ -550,6 +557,23 @@ export async function pushProfile(profile: ProfileRecord, level: number): Promis
       () => undefined,
     );
 
+  // 1 на 1: the duel rating, and the best Rush as a timeline for others to race — again a write
+  // of its own, for a project that hasn't run supabase/duels.sql yet.
+  await db
+    .from('players')
+    .update({
+      duel_rating: profile.duelRating ?? DUEL_START,
+      duel_wins: profile.duelWins ?? 0,
+      duel_losses: profile.duelLosses ?? 0,
+      duel_draws: profile.duelDraws ?? 0,
+      rush_run: profile.rushBestRun ?? null,
+    })
+    .eq('id', id)
+    .then(
+      () => undefined,
+      () => undefined,
+    );
+
   await db.from('saves').upsert({ id, profile: profile as unknown as Record<string, unknown> });
 }
 
@@ -589,7 +613,14 @@ export async function fetchLeaderboard(limit = 50): Promise<LeaderboardRow[]> {
   // With the rank columns where the project has them (supabase/ranks.sql), without where not.
   const query = (cols: string) =>
     db.from('players').select(cols).order('total_pushups', { ascending: false }).limit(limit);
-  let res = await query(`${base}, best_set, week_reps, week_key`);
+  // And the avatar and duel columns where the project has those (supabase/avatars.sql, duels.sql)
+  // — the richest select that works, falling back one optional script at a time.
+  const ranks = 'best_set, week_reps, week_key';
+  const duels = 'duel_rating, duel_wins, duel_losses';
+  let res = await query(`${base}, ${ranks}, avatar, ${duels}`);
+  if (res.error) res = await query(`${base}, ${ranks}, avatar`);
+  if (res.error) res = await query(`${base}, ${ranks}, ${duels}`);
+  if (res.error) res = await query(`${base}, ${ranks}`);
   if (res.error) res = await query(base);
   const { data, error } = res;
   if (error || !data) return [];
@@ -605,7 +636,122 @@ export async function fetchLeaderboard(limit = 50): Promise<LeaderboardRow[]> {
     streak: r.streak as number,
     bossesDefeated: r.bosses_defeated as number,
     rushBestReps: r.rush_best_reps as number,
+    avatar: (r.avatar as string | null | undefined) ?? null,
+    duelRating: (r.duel_rating as number | undefined) ?? DUEL_START,
+    duelWins: (r.duel_wins as number | undefined) ?? 0,
+    duelLosses: (r.duel_losses as number | undefined) ?? 0,
   }));
+}
+
+/* ------------------------------- 1 на 1 ------------------------------- */
+
+/** Someone to challenge: who they are, their rating, and their best Rush to race. */
+export interface DuelOpponent {
+  id: string;
+  name: string;
+  avatar: string | null;
+  level: number;
+  rating: number;
+  rushBest: number;
+  /** When each rep of that best minute landed; null for a record set before those were kept. */
+  run: number[] | null;
+}
+
+/**
+ * Players to challenge near `rating`: everyone else with a Rush record, closest ratings first —
+ * looked for in a window that widens until there are a few. Empty when there's nobody, or the
+ * server hasn't got the duel columns yet (supabase/duels.sql).
+ */
+export async function fetchDuelOpponents(rating: number): Promise<DuelOpponent[]> {
+  const db = supabase();
+  if (!db) return [];
+  const { data: auth } = await db.auth.getUser();
+  const me = auth.user?.id;
+  if (!me) return [];
+  const cols = 'id, display_name, level, duel_rating, rush_best_reps, rush_run';
+  const fetchWindow = async (width: number | null, withAvatar: boolean) => {
+    let q = db
+      .from('players')
+      .select(withAvatar ? `${cols}, avatar` : cols)
+      .gt('rush_best_reps', 0)
+      .neq('id', me)
+      .limit(40);
+    if (width != null) q = q.gte('duel_rating', rating - width).lte('duel_rating', rating + width);
+    return q;
+  };
+  for (const width of [150, 400, null]) {
+    let res = await fetchWindow(width, true);
+    if (res.error) res = await fetchWindow(width, false);
+    if (res.error) return [];
+    const rows = (res.data ?? []) as unknown as Record<string, unknown>[];
+    if (rows.length >= 3 || width == null) {
+      return rows.map((r) => ({
+        id: r.id as string,
+        name: r.display_name as string,
+        avatar: (r.avatar as string | null | undefined) ?? null,
+        level: r.level as number,
+        rating: (r.duel_rating as number | undefined) ?? DUEL_START,
+        rushBest: r.rush_best_reps as number,
+        run: Array.isArray(r.rush_run) ? (r.rush_run as number[]) : null,
+      }));
+    }
+  }
+  return [];
+}
+
+/* ------------------------------- avatars ------------------------------ */
+
+/** Said when the server doesn't have the avatar column or bucket yet. */
+const AVATARS_NOT_SET_UP = 'Аватарки ещё не включены на сервере — нужно один раз запустить supabase/avatars.sql в Supabase.';
+
+/** Whether an error is the server not knowing about avatars at all yet. */
+function avatarsMissing(message: string): boolean {
+  return /avatar|bucket not found|does not exist|schema cache/i.test(message);
+}
+
+/** The signed-in player's avatar, or null — also null if the server has no avatars yet. */
+export async function getMyAvatar(): Promise<string | null> {
+  const db = supabase();
+  if (!db) return null;
+  const { data: auth } = await db.auth.getUser();
+  if (!auth.user) return null;
+  const { data, error } = await db.from('players').select('avatar').eq('id', auth.user.id).maybeSingle();
+  if (error) return null;
+  return (data?.avatar as string | null | undefined) ?? null;
+}
+
+/** Sets what's on the player's avatar: a gallery pick, an uploaded photo's address, or null for the letter. */
+export async function saveMyAvatar(avatar: string | null): Promise<CloudError> {
+  const db = supabase();
+  if (!db) return { message: 'Облако не настроено.' };
+  const { data: auth } = await db.auth.getUser();
+  const id = auth.user?.id;
+  if (!id) return { message: 'Сначала войди в аккаунт.' };
+  const { error } = await db.from('players').update({ avatar }).eq('id', id);
+  if (error) return { message: avatarsMissing(error.message) ? AVATARS_NOT_SET_UP : translate(error.message) };
+  return null;
+}
+
+/**
+ * Uploads a photo for the avatar into the player's own folder and returns its public address.
+ * Earlier photos in the folder are cleared out after, so each player keeps one.
+ */
+export async function uploadAvatar(photo: Blob): Promise<{ url: string } | { error: CloudError }> {
+  const db = supabase();
+  if (!db) return { error: { message: 'Облако не настроено.' } };
+  const { data: auth } = await db.auth.getUser();
+  const id = auth.user?.id;
+  if (!id) return { error: { message: 'Сначала войди в аккаунт.' } };
+  // A new name each time: a fixed one would sit in every cache with the old picture.
+  const path = `${id}/avatar-${Date.now()}.jpg`;
+  const bucket = db.storage.from('avatars');
+  const { error } = await bucket.upload(path, photo, { contentType: 'image/jpeg', upsert: false });
+  if (error) return { error: { message: avatarsMissing(error.message) ? AVATARS_NOT_SET_UP : translate(error.message) } };
+  // Tidy up the old ones; a failure here costs a little storage, nothing more.
+  const { data: files } = await bucket.list(id);
+  const old = (files ?? []).map((f) => `${id}/${f.name}`).filter((p) => p !== path);
+  if (old.length) await bucket.remove(old);
+  return { url: bucket.getPublicUrl(path).data.publicUrl };
 }
 
 /* ------------------------------- admin -------------------------------- */

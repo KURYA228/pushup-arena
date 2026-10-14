@@ -56,6 +56,7 @@ function App() {
     registerBossRep,
     registerRushRep,
     finishRush,
+    recordDuel,
     revertRep,
     tickArena,
     buyUpgrade,
@@ -177,6 +178,9 @@ function App() {
                 finishRush={finishRush}
                 feedback={feedback}
                 notify={push}
+                me={{ name: cloud.session ? (cloud.name ?? null) : null, avatar: cloud.session ? cloud.avatar : null, level: derived.level }}
+                fetchOpponents={(rating) => (cloud.session ? cloud.fetchDuelOpponents(rating) : Promise.resolve([]))}
+                recordDuel={recordDuel}
               />
             )}
         </motion.div>

@@ -22,6 +22,8 @@ import { SEASON, isStale } from '../lib/season';
 import { clearMark } from '../lib/syncMark';
 import { MAX_FREEZES, STARTING_FREEZES, advanceStreak, freezesOf, todayLocal } from '../lib/streak';
 import { packRun } from '../lib/ghost';
+import { DUEL_START, canDuel, logDuel, ratingDelta, type DuelOutcome } from '../data/duel';
+import { localDay } from '../lib/stats';
 import { DEFAULT_WEEKLY_GOAL, weekKey, weekStart, weeklyBonusXp } from '../lib/weekly';
 import { FREEZE_COST, UPGRADES, nextCost, perksFrom, upgradeLevel, type UpgradeId } from '../data/shop';
 
@@ -400,6 +402,28 @@ export function useProfile() {
   }, []);
 
   /**
+   * Records the result of a 1 на 1 against `opponent`: the rating moves by Elo and the win, loss
+   * or draw is counted. A sparring robot (null) moves nothing, and neither does a duel past
+   * today's DUEL_DAILY_LIMIT against the same player. Returns the rating before and after.
+   */
+  const recordDuel = useCallback(async (outcome: DuelOutcome, opponent: { id: string; rating: number } | null) => {
+    const p = await ensureProfile();
+    const before = p.duelRating ?? DUEL_START;
+    const day = localDay(Date.now());
+    if (!opponent || !canDuel(p.duelDay, day, opponent.id)) return { before, after: before };
+    const after = Math.max(0, before + ratingDelta(before, opponent.rating, outcome));
+    await db.profile.put({
+      ...p,
+      duelDay: logDuel(p.duelDay, day, opponent.id),
+      duelRating: after,
+      duelWins: (p.duelWins ?? 0) + (outcome === 'win' ? 1 : 0),
+      duelLosses: (p.duelLosses ?? 0) + (outcome === 'loss' ? 1 : 0),
+      duelDraws: (p.duelDraws ?? 0) + (outcome === 'draw' ? 1 : 0),
+    });
+    return { before, after };
+  }, []);
+
+  /**
    * Takes one rep back, in either mode. Reverses the pushup count, the XP it granted and any
    * achievements it unlocked, and — when the rep was the one that finished a boss — puts the boss
    * back together: previous stage, step inside it, the HP the enemy had before the hit, and
@@ -562,6 +586,7 @@ export function useProfile() {
     startReplay,
     endReplay,
     finishRush,
+    recordDuel,
     tickArena,
     revertRep,
     buyUpgrade,

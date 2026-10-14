@@ -6,6 +6,11 @@ import { Penguin } from './Penguin';
 import { BeastBoy, Cyborg, Raven, Starfire } from './Titans';
 import { Antipka, BOGATYRS, Bogatyr } from './Kyiv';
 import { FootNinja, Mouser, Turtle } from './ShredderFx';
+import { Crown, KingFace } from './KingFx';
+import { GoblinMini, JackO } from './GoblinFx';
+import { MiniPo, PeachPetal } from './TaiLungFx';
+import { Mjolnir } from './UltronFx';
+import { Laurel, Spartan } from './KiryukhaFx';
 
 /**
  * The bosses' abilities, acted out. Each signature move gets a little scene of its own over the
@@ -60,7 +65,12 @@ export type SceneKind =
   | 'soup-cool'
   | 'laser-volley'
   | 'mousers'
-  | 'cowabunga';
+  | 'cowabunga'
+  | 'tower-fall'
+  | 'goblin-blast'
+  | 'wuxi'
+  | 'mjolnir'
+  | 'laurel';
 
 export interface Scene {
   id: number;
@@ -118,6 +128,11 @@ export const SCENE_MS: Record<SceneKind, number> = {
   'laser-volley': 700,
   'mousers': 2400,
   cowabunga: 3500,
+  'tower-fall': 3000,
+  'goblin-blast': 3200,
+  wuxi: 3600,
+  mjolnir: 3400,
+  laurel: 4200,
 };
 
 /**
@@ -182,6 +197,11 @@ const BODIES: Record<SceneKind, (p: BodyProps) => React.ReactNode> = {
   'laser-volley': LaserVolley,
   mousers: Mousers,
   cowabunga: Cowabunga,
+  'tower-fall': TowerFall,
+  'goblin-blast': GoblinBlast,
+  wuxi: Wuxi,
+  mjolnir: MjolnirStrike,
+  laurel: LaurelCrown,
 };
 
 /* --------------------------------- helpers -------------------------------- */
@@ -1688,11 +1708,21 @@ function PigPoof({ scene }: BodyProps) {
 /** The ice block round Gru giving way: big clear shards flying off, a frosty puff, a flash. */
 function IceShatter({ scene }: BodyProps) {
   const shards = useSpray(20, [100, 220]);
+  // Variant 1 is the King's: his shield is royal gold glass, not ice.
+  const gold = scene.variant === 1;
   return (
     <At x={scene.x} y={scene.y}>
       <motion.div
         className="absolute rounded-full"
-        style={{ width: 200, height: 200, left: -100, top: -100, background: 'radial-gradient(circle, rgba(255,255,255,0.95), rgba(186,230,253,0.5) 40%, transparent 70%)' }}
+        style={{
+          width: 200,
+          height: 200,
+          left: -100,
+          top: -100,
+          background: gold
+            ? 'radial-gradient(circle, rgba(255,255,255,0.95), rgba(253,224,71,0.5) 40%, transparent 70%)'
+            : 'radial-gradient(circle, rgba(255,255,255,0.95), rgba(186,230,253,0.5) 40%, transparent 70%)',
+        }}
         initial={{ scale: 0.4, opacity: 1 }}
         animate={{ scale: 2, opacity: 0 }}
         transition={{ duration: 0.5, ease: 'easeOut' }}
@@ -1707,8 +1737,10 @@ function IceShatter({ scene }: BodyProps) {
             marginLeft: -13 * p.s,
             marginTop: -17 * p.s,
             clipPath: i % 2 ? 'polygon(50% 0, 100% 40%, 60% 100%, 0 60%)' : 'polygon(20% 0, 100% 25%, 75% 100%, 0 80%)',
-            background: 'linear-gradient(140deg, rgba(255,255,255,0.95), rgba(186,230,253,0.85) 45%, rgba(56,189,248,0.7))',
-            filter: 'drop-shadow(0 0 6px #7dd3fc)',
+            background: gold
+              ? 'linear-gradient(140deg, rgba(255,255,255,0.95), rgba(253,230,138,0.9) 45%, rgba(202,138,4,0.75))'
+              : 'linear-gradient(140deg, rgba(255,255,255,0.95), rgba(186,230,253,0.85) 45%, rgba(56,189,248,0.7))',
+            filter: gold ? 'drop-shadow(0 0 6px #facc15)' : 'drop-shadow(0 0 6px #7dd3fc)',
           }}
           initial={{ x: 0, y: 0, rotate: 0, opacity: 1 }}
           animate={{ x: p.dx, y: [0, p.dy - 30, p.dy + 160], rotate: p.rot, opacity: [1, 1, 0] }}
@@ -3119,6 +3151,514 @@ function Cowabunga({ scene }: BodyProps) {
       >
         КАВАБАНГА!
       </motion.span>
+    </At>
+  );
+}
+
+/* --------------------------------- Король -------------------------------- */
+
+/**
+ * The King going down the way a King Tower does in Clash Royale: a blast, the stonework flying
+ * apart in a cloud of dust, his face popping up out of the rubble in a sulk — and then the three
+ * crowns for a three-crown win, dropping into a row one after another.
+ */
+function TowerFall({ scene }: BodyProps) {
+  const debris = useSpray(18, [120, 280]);
+  const dust = useMemo(
+    () =>
+      Array.from({ length: 14 }, (_, i) => {
+        const a = (i / 14) * Math.PI * 2;
+        return { dx: Math.cos(a) * rand(50, 120), dy: Math.sin(a) * rand(20, 60) + 30, s: rand(60, 110), delay: rand(0, 0.2) };
+      }),
+    [],
+  );
+  return (
+    <At x={scene.x} y={scene.y}>
+      {/* The blast. */}
+      <motion.div
+        className="absolute rounded-full"
+        style={{ width: 240, height: 240, left: -120, top: -120, background: 'radial-gradient(circle, #ffffff 0%, #fde68a 25%, #f97316 50%, transparent 72%)' }}
+        initial={{ scale: 0.2, opacity: 1 }}
+        animate={{ scale: 2.2, opacity: 0 }}
+        transition={{ duration: 0.55, ease: 'easeOut' }}
+      />
+      {/* Dust rolling out and hanging. */}
+      {dust.map((p, i) => (
+        <motion.div
+          key={`d${i}`}
+          className="absolute rounded-full"
+          style={{ width: p.s, height: p.s, marginLeft: -p.s / 2, marginTop: -p.s / 2, background: 'radial-gradient(circle at 40% 35%, #e7e2d8, #a8a29e 60%, rgba(120,113,108,0.6))' }}
+          initial={{ x: 0, y: 0, scale: 0.2, opacity: 0 }}
+          animate={{ x: p.dx, y: p.dy, scale: [0.2, 1.1, 1.4], opacity: [0, 0.9, 0] }}
+          transition={{ duration: 1.8, delay: p.delay, ease: 'easeOut' }}
+        />
+      ))}
+      {/* The stonework flying apart: blocks of grey, a few of his red-and-gold banner. */}
+      {debris.map((p, i) => (
+        <motion.div
+          key={`s${i}`}
+          className="absolute rounded-sm border border-black/30"
+          style={{
+            width: i % 4 === 0 ? 16 : 26 * p.s,
+            height: i % 4 === 0 ? 22 : 16 * p.s,
+            marginLeft: -12,
+            marginTop: -8,
+            background: i % 4 === 0 ? 'linear-gradient(180deg, #dc2626, #991b1b 70%, #facc15 70%)' : STONE,
+          }}
+          initial={{ x: 0, y: 0, rotate: 0, opacity: 0 }}
+          animate={{ x: p.dx, y: [0, p.dy - 90, p.dy + 260], rotate: p.rot * 1.5, opacity: [0, 1, 1, 0] }}
+          transition={{ duration: 1.6, ease: 'easeOut' }}
+        />
+      ))}
+      {/* His face out of the rubble, sulking, then sinking back. */}
+      <motion.div
+        className="absolute"
+        style={{ left: -45, top: -20 }}
+        initial={{ y: 60, opacity: 0, scale: 0.6 }}
+        animate={{ y: [60, -10, -10, 70], opacity: [0, 1, 1, 0], scale: [0.6, 1.1, 1, 0.8], rotate: [0, -6, 6, 0] }}
+        transition={{ duration: 1.6, delay: 0.45, times: [0, 0.25, 0.75, 1] }}
+      >
+        <KingFace size={90} />
+      </motion.div>
+      {/* Three crowns dropping into a row. */}
+      <div className="absolute" style={{ top: -150 }}>
+        {[-1, 0, 1].map((k, i) => (
+          <motion.div
+            key={k}
+            className="absolute"
+            style={{ left: k * 74 - 32, top: k === 0 ? -14 : 0 }}
+            initial={{ y: -260, scale: 0.4, rotate: k * 30, opacity: 0 }}
+            animate={{ y: [-260, 0, -12, 0, 0], scale: [0.4, 1.25, 1, 1, 0.9], rotate: [k * 30, 0, 0, 0, 0], opacity: [0, 1, 1, 1, 0] }}
+            transition={{ duration: 1.9, delay: 0.95 + i * 0.32, times: [0, 0.18, 0.28, 0.85, 1], ease: 'easeOut' }}
+          >
+            <div style={{ filter: 'drop-shadow(0 0 12px #60a5fa)' }}>
+              <Crown size={64} />
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    </At>
+  );
+}
+
+/* ------------------------------ Зелёный Гоблин ----------------------------- */
+
+/** When, in the Goblin's last scene, his bomb goes off (s) — the sound keeps to it too. */
+export const GOBLIN_BOOM_SEC = 0.9;
+
+/**
+ * The Goblin going down with his own bomb: the pumpkin from his hand rolls out in front of him,
+ * fuse fizzing, its grin flashing faster and faster — and it goes off. A white-hot flash, a ring
+ * of shock, the Goblin blown up and away spinning off his glider, pumpkin shell flying, and a
+ * great cloud of orange smoke rolling out and up and hanging there before it thins away.
+ */
+function GoblinBlast({ scene }: BodyProps) {
+  const B = GOBLIN_BOOM_SEC;
+  const smoke = useMemo(
+    () =>
+      Array.from({ length: 22 }, (_, i) => {
+        const a = (i / 22) * Math.PI * 2 + rand(-0.2, 0.2);
+        const d = rand(40, 150);
+        return {
+          dx: Math.cos(a) * d,
+          dy: Math.sin(a) * d * 0.7 - rand(20, 90),
+          s: rand(70, 140),
+          delay: B + rand(0, 0.25),
+          hue: i % 3,
+        };
+      }),
+    [B],
+  );
+  const shell = useSpray(14, [120, 260]);
+  const SMOKE = [
+    'radial-gradient(circle at 40% 35%, #fed7aa, #fb923c 50%, rgba(234,88,12,0.55))',
+    'radial-gradient(circle at 40% 35%, #ffedd5, #f97316 55%, rgba(194,65,12,0.5))',
+    'radial-gradient(circle at 40% 35%, #fde68a, #fdba74 50%, rgba(249,115,22,0.45))',
+  ];
+  return (
+    <At x={scene.x} y={scene.y}>
+      {/* The bomb, rolling out in front of him, flashing faster as the fuse runs down. */}
+      <motion.div
+        className="absolute"
+        style={{ left: -32, top: 10 }}
+        initial={{ scale: 0.4, opacity: 0, x: 60, rotate: 90 }}
+        animate={{ scale: [0.4, 1, 1, 1.15, 1.3], opacity: [0, 1, 1, 1, 0], x: [60, 0, 0, 0, 0], rotate: [90, 0, -6, 6, 0] }}
+        transition={{ duration: B + 0.05, times: [0, 0.3, 0.6, 0.9, 1] }}
+      >
+        <motion.div
+          animate={{ filter: ['brightness(1)', 'brightness(2.2)', 'brightness(1)', 'brightness(2.4)', 'brightness(1)', 'brightness(2.6)', 'brightness(1)', 'brightness(3)'] }}
+          transition={{ duration: B, times: [0, 0.3, 0.45, 0.6, 0.7, 0.8, 0.88, 1] }}
+        >
+          <JackO size={64} />
+        </motion.div>
+        {/* The fuse fizzing. */}
+        {Array.from({ length: 6 }, (_, i) => (
+          <motion.span
+            key={i}
+            className="absolute block h-1 w-1 rounded-full bg-yellow-200"
+            style={{ left: 40, top: 4, boxShadow: '0 0 4px #facc15' }}
+            animate={{ x: [0, rand(-14, 14)], y: [0, rand(-16, -4)], opacity: [1, 0] }}
+            transition={{ duration: 0.25, delay: i * 0.12, repeat: 1 }}
+          />
+        ))}
+      </motion.div>
+
+      {/* The flash and the ring of shock. */}
+      <motion.div
+        className="absolute rounded-full"
+        style={{ width: 300, height: 300, left: -150, top: -150, background: 'radial-gradient(circle, #ffffff 0%, #fef3c7 20%, #fb923c 45%, transparent 70%)' }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 0, 2], opacity: [0, 1, 0] }}
+        transition={{ duration: B + 0.6, times: [0, B / (B + 0.6), 1], ease: 'easeOut' }}
+      />
+      <motion.div
+        className="absolute rounded-full border-[5px]"
+        style={{ width: 80, height: 80, left: -40, top: -40, borderColor: '#fed7aa', boxShadow: '0 0 24px #f97316' }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 0, 5], opacity: [0, 1, 0] }}
+        transition={{ duration: B + 0.55, times: [0, B / (B + 0.55), 1], ease: 'easeOut' }}
+      />
+
+      {/* Orange smoke: rolling out, rising, hanging, thinning. */}
+      {smoke.map((p, i) => (
+        <motion.div
+          key={i}
+          className="absolute rounded-full"
+          style={{ width: p.s, height: p.s, marginLeft: -p.s / 2, marginTop: -p.s / 2, background: SMOKE[p.hue], filter: 'blur(1px)' }}
+          initial={{ x: 0, y: 0, scale: 0.1, opacity: 0 }}
+          animate={{ x: [0, p.dx, p.dx * 1.15], y: [0, p.dy, p.dy - 50], scale: [0.1, 1, 1.35], opacity: [0, 0.95, 0] }}
+          transition={{ duration: 2.3, delay: p.delay, times: [0, 0.3, 1], ease: 'easeOut' }}
+        />
+      ))}
+
+      {/* Pumpkin shell flying. */}
+      {shell.map((p, i) => (
+        <motion.div
+          key={`s${i}`}
+          className="absolute"
+          style={{ width: 16 * p.s, height: 11 * p.s, marginLeft: -8, marginTop: -5, borderRadius: '60% 60% 30% 30%', background: i % 3 ? '#ea580c' : '#fde047', border: '1.5px solid #7c2d12' }}
+          initial={{ x: 0, y: 0, opacity: 0 }}
+          animate={{ x: [0, 0, p.dx], y: [0, 0, p.dy + 140], rotate: [0, 0, p.rot * 2], opacity: [0, 0, 1, 0] }}
+          transition={{ duration: B + 1.2, times: [0, B / (B + 1.2), 0.75, 1], ease: 'easeOut' }}
+        />
+      ))}
+
+      {/* The Goblin, blown up and away off his glider, spinning. */}
+      <motion.div
+        className="absolute"
+        style={{ left: -45, top: -60 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: [0, 0, 1, 1, 0], x: [0, 0, 60, 160, 240], y: [0, 0, -120, -220, -160], rotate: [0, 0, 220, 520, 720], scale: [0.6, 0.6, 1, 0.8, 0.5] }}
+        transition={{ duration: B + 1.4, times: [0, B / (B + 1.4), 0.55, 0.8, 1], ease: 'easeOut' }}
+      >
+        <GoblinMini size={90} />
+      </motion.div>
+
+      {/* The word. */}
+      <motion.div
+        className="absolute whitespace-nowrap text-5xl font-black"
+        style={{ left: -110, width: 220, top: -40, textAlign: 'center', color: '#fde047', WebkitTextStroke: '2.5px #7c2d12', textShadow: '0 4px 0 #7c2d12', fontFamily: "'Russo One', sans-serif" }}
+        initial={{ scale: 0, opacity: 0, rotate: -8 }}
+        animate={{ scale: [0, 0, 1.35, 1, 1], opacity: [0, 0, 1, 1, 0], rotate: [-8, -8, 5, 0, 0] }}
+        transition={{ duration: B + 2, times: [0, B / (B + 2), (B + 0.15) / (B + 2), 0.8, 1] }}
+      >
+        БА-БАХ!
+      </motion.div>
+    </At>
+  );
+}
+
+/* --------------------------------- Тай Лунг -------------------------------- */
+
+/** When, in Tai Lung's last scene, the golden blast goes off (s) — the sound keeps to it too. */
+export const WUXI_BOOM_SEC = 1.3;
+
+/**
+ * Tai Lung going down the way he does in the film: the Wuxi finger hold. Po pops up in front of
+ * him with a paw held up, little finger raised — «СКИДЫЩ!» — the finger comes down, and a golden
+ * blast rolls out from the spot: a white-gold flash, a ring of light sweeping out past the edges
+ * of the screen, a gust of dust and peach blossom thrown out on it.
+ */
+function Wuxi({ scene }: BodyProps) {
+  const B = WUXI_BOOM_SEC;
+  const petals = useSpray(18, [140, 320]);
+  const reach = Math.hypot(window.innerWidth, window.innerHeight);
+  return (
+    <At x={scene.x} y={scene.y}>
+      {/* Po, popping up in front with his paw raised. */}
+      <motion.div
+        className="absolute"
+        style={{ left: -50, top: 10 }}
+        initial={{ y: 80, opacity: 0, scale: 0.6 }}
+        animate={{ y: [80, 0, 0, 0, 30], opacity: [0, 1, 1, 1, 0], scale: [0.6, 1, 1, 1.05, 0.9] }}
+        transition={{ duration: B + 0.6, times: [0, 0.2, 0.7, B / (B + 0.6), 1] }}
+      >
+        <MiniPo size={100} />
+      </motion.div>
+      {/* The paw, little finger up — and down. */}
+      <motion.div
+        className="absolute"
+        style={{ left: 30, top: -70 }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 1.2, 1, 1, 1.2], opacity: [0, 1, 1, 1, 0] }}
+        transition={{ duration: B + 0.2, times: [0, 0.15, 0.25, 0.85, 1] }}
+      >
+        <svg width={70} height={80} viewBox="0 0 70 80" aria-hidden style={{ filter: 'drop-shadow(0 0 8px #fde68a)' }}>
+          <ellipse cx={35} cy={56} rx={22} ry={20} fill="#111" />
+          <rect x={14} y={32} width={10} height={22} rx={5} fill="#111" />
+          <rect x={26} y={30} width={10} height={22} rx={5} fill="#111" />
+          <rect x={38} y={32} width={10} height={22} rx={5} fill="#111" />
+          {/* The little finger: raised, then folding down on the beat. */}
+          <motion.rect
+            x={50}
+            y={10}
+            width={9}
+            height={34}
+            rx={4.5}
+            fill="#111"
+            style={{ transformOrigin: '54px 44px' }}
+            animate={{ rotate: [0, 0, 80] }}
+            transition={{ duration: B, times: [0, 0.75, 1] }}
+          />
+        </svg>
+      </motion.div>
+      {/* «СКИДЫЩ!» */}
+      <motion.div
+        className="absolute whitespace-nowrap text-5xl font-black"
+        style={{ left: -120, width: 240, top: -120, textAlign: 'center', color: '#fde68a', WebkitTextStroke: '2.5px #7c2d12', textShadow: '0 4px 0 #7c2d12', fontFamily: "'Russo One', sans-serif" }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 0, 1.3, 1, 1], opacity: [0, 0, 1, 1, 0] }}
+        transition={{ duration: B + 2, times: [0, 0.3, 0.38, 0.85, 1] }}
+      >
+        СКИДЫЩ!
+      </motion.div>
+      {/* The blast: flash, then a ring of gold sweeping out past the screen's edges. */}
+      <motion.div
+        className="absolute rounded-full"
+        style={{ width: 260, height: 260, left: -130, top: -130, background: 'radial-gradient(circle, #ffffff 0%, #fef3c7 30%, #fbbf24 55%, transparent 72%)' }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 0, 2.6], opacity: [0, 1, 0] }}
+        transition={{ duration: B + 0.8, times: [0, B / (B + 0.8), 1], ease: 'easeOut' }}
+      />
+      <motion.div
+        className="absolute rounded-full"
+        style={{ width: 100, height: 100, left: -50, top: -50, border: '10px solid #fde68a', boxShadow: '0 0 40px #f59e0b, inset 0 0 40px #f59e0b' }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 0, (reach * 2.2) / 100], opacity: [0, 1, 0] }}
+        transition={{ duration: B + 1.2, times: [0, B / (B + 1.2), 1], ease: 'easeOut' }}
+      />
+      {/* Dust and peach blossom thrown out on it. */}
+      {petals.map((p, i) => (
+        <motion.div
+          key={i}
+          className="absolute"
+          style={{ marginLeft: -8, marginTop: -8 }}
+          initial={{ x: 0, y: 0, opacity: 0 }}
+          animate={{ x: [0, 0, p.dx], y: [0, 0, p.dy], rotate: [0, 0, p.rot * 2], opacity: [0, 0, 1, 0] }}
+          transition={{ duration: B + 1.3, times: [0, B / (B + 1.3), (B + 0.3) / (B + 1.3), 1], ease: 'easeOut' }}
+        >
+          {i % 3 ? <PeachPetal size={16 * p.s} /> : <div className="h-4 w-4 rounded-full bg-amber-100/70 blur-[2px]" />}
+        </motion.div>
+      ))}
+    </At>
+  );
+}
+
+/* --------------------------------- Альтрон --------------------------------- */
+
+/** When, in Ultron's last scene, the hammer lands (s) — the sound keeps to it too. */
+export const MJOLNIR_STRIKE_SEC = 0.75;
+
+/**
+ * Ultron going down: Mjolnir comes spinning in from the top corner of the screen trailing
+ * lightning, and hits him square. A blue-white flash, forks of lightning, and his steel bursting
+ * apart — dark plates and red-glowing bits flying out, a last red eye blinking out —
+ * «СИСТЕМА ОТКЛЮЧЕНА».
+ */
+function MjolnirStrike({ scene }: BodyProps) {
+  const S = MJOLNIR_STRIKE_SEC;
+  const side = useMemo(() => (Math.random() < 0.5 ? -1 : 1), []);
+  const from = { x: side * (window.innerWidth / 2 + 60), y: -scene.y - 60 };
+  const plates = useSpray(20, [120, 300]);
+  const f = (t: number, total: number) => t / total;
+  return (
+    <At x={scene.x} y={scene.y}>
+      {/* The hammer, spinning in. */}
+      <motion.div
+        className="absolute"
+        style={{ left: -30, top: -30 }}
+        initial={{ x: from.x, y: from.y, rotate: 0, opacity: 1 }}
+        animate={{ x: [from.x, 0, side * 40], y: [from.y, 0, -60], rotate: [0, side * 720, side * 820], opacity: [1, 1, 0] }}
+        transition={{ duration: S + 0.5, times: [0, f(S, S + 0.5), 1], ease: 'easeIn' }}
+      >
+        <Mjolnir size={60} />
+      </motion.div>
+      {/* Lightning trailing it in, and forking out from the hit. */}
+      {[0, 1, 2, 3, 4].map((i) => {
+        const a = (i / 5) * 360 + side * 20;
+        return (
+          <motion.svg
+            key={i}
+            viewBox="0 0 20 100"
+            className="absolute"
+            style={{ left: -10, top: 0, width: 20, height: 140, transformOrigin: '50% 0%', rotate: a, filter: 'drop-shadow(0 0 6px #93c5fd)' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0, 0, 1, 0, 0.8, 0] }}
+            transition={{ duration: S + 0.5, times: [0, f(S, S + 0.5), f(S + 0.05, S + 0.5), f(S + 0.15, S + 0.5), f(S + 0.22, S + 0.5), 1] }}
+          >
+            <path d="M10 0 L6 30 L13 34 L4 66 L11 70 L3 100" stroke="#eff6ff" strokeWidth={2.5} fill="none" />
+          </motion.svg>
+        );
+      })}
+      <motion.div
+        className="absolute rounded-full"
+        style={{ width: 280, height: 280, left: -140, top: -140, background: 'radial-gradient(circle, #ffffff 0%, #bfdbfe 30%, #3b82f6 55%, transparent 72%)' }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: [0, 0, 2.2], opacity: [0, 1, 0] }}
+        transition={{ duration: S + 0.6, times: [0, f(S, S + 0.6), 1], ease: 'easeOut' }}
+      />
+      {/* His steel bursting apart. */}
+      {plates.map((p, i) => (
+        <motion.div
+          key={i}
+          className="absolute"
+          style={{
+            width: 22 * p.s,
+            height: 14 * p.s,
+            marginLeft: -11,
+            marginTop: -7,
+            clipPath: 'polygon(10% 0, 100% 20%, 85% 100%, 0 70%)',
+            background: i % 4 ? 'linear-gradient(135deg, #6b7280, #1f2937)' : 'radial-gradient(circle, #fecaca, #ef4444 60%, #7f1d1d)',
+            boxShadow: i % 4 ? undefined : '0 0 8px #ef4444',
+          }}
+          initial={{ x: 0, y: 0, opacity: 0 }}
+          animate={{ x: [0, 0, p.dx], y: [0, 0, p.dy + 180], rotate: [0, 0, p.rot * 2], opacity: [0, 0, 1, 0] }}
+          transition={{ duration: S + 1.4, times: [0, f(S, S + 1.4), f(S + 0.2, S + 1.4), 1], ease: 'easeOut' }}
+        />
+      ))}
+      {/* A last red eye, blinking out. */}
+      <motion.div
+        className="absolute rounded-full"
+        style={{ width: 14, height: 14, left: -7, top: -7, background: '#ef4444', boxShadow: '0 0 14px #ef4444' }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: [0, 0, 1, 0.2, 1, 0], scale: [1, 1, 1, 1, 1, 0.2] }}
+        transition={{ duration: S + 1.6, times: [0, f(S + 0.4, S + 1.6), f(S + 0.6, S + 1.6), f(S + 0.9, S + 1.6), f(S + 1.1, S + 1.6), 1] }}
+      />
+      <motion.div
+        className="absolute whitespace-nowrap font-mono text-2xl font-black"
+        style={{ left: -130, width: 260, top: 60, textAlign: 'center', color: '#fecaca', textShadow: '0 0 10px #ef4444, 0 3px 0 #450a0a' }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: [0, 0, 1, 0.4, 1, 1, 0] }}
+        transition={{ duration: S + 2.4, times: [0, f(S + 0.3, S + 2.4), f(S + 0.4, S + 2.4), f(S + 0.5, S + 2.4), f(S + 0.6, S + 2.4), 0.88, 1] }}
+      >
+        СИСТЕМА ОТКЛЮЧЕНА
+      </motion.div>
+    </At>
+  );
+}
+
+/* --------------------------------- Кирюха --------------------------------- */
+
+/** When, in Kiryukha's last scene, the wreath settles and the crowd goes up (s). */
+export const LAUREL_AT_SEC = 1.3;
+
+/**
+ * Kiryukha going down — the master of the arena beaten. He drops to one knee in a burst of sand,
+ * his helmet coming off and rolling away; spartans run in from both sides and raise their spears;
+ * and a golden laurel wreath floats down from above to where his head was — for the player now —
+ * with rose petals falling over the whole arena. «НОВЫЙ ХОЗЯИН АРЕНЫ».
+ */
+function LaurelCrown({ scene }: BodyProps) {
+  const L = LAUREL_AT_SEC;
+  const petals = useMemo(
+    () =>
+      Array.from({ length: 26 }, () => ({
+        x: rand(-window.innerWidth / 2, window.innerWidth / 2),
+        delay: rand(L, L + 1.4),
+        d: rand(2.2, 3.4),
+        rot: rand(0, 360),
+        sway: rand(-40, 40),
+      })),
+    [L],
+  );
+  const sand = useSpray(16, [80, 200]);
+  return (
+    <At x={scene.x} y={scene.y}>
+      {/* The sand thrown up as he goes down. */}
+      {sand.map((p, i) => (
+        <motion.span
+          key={`s${i}`}
+          className="absolute block rounded-full"
+          style={{ width: 26 * p.s, height: 26 * p.s, marginLeft: -13 * p.s, marginTop: -13 * p.s, background: 'radial-gradient(circle at 40% 35%, #f5e6cf, #d6b48a 55%, rgba(168,135,95,0.4))' }}
+          initial={{ x: 0, y: 60, scale: 0.2, opacity: 0 }}
+          animate={{ x: p.dx, y: 60 + p.dy * 0.4, scale: [0.2, 1, 1.4], opacity: [0, 0.85, 0] }}
+          transition={{ duration: 1.4, ease: 'easeOut' }}
+        />
+      ))}
+      {/* His helmet, knocked off and rolling away. */}
+      <motion.div
+        className="absolute"
+        style={{ left: -18, top: -80 }}
+        initial={{ x: 0, y: 0, rotate: 0, opacity: 0 }}
+        animate={{ x: [0, 40, 150], y: [0, -60, 150], rotate: [0, 180, 600], opacity: [0, 1, 1, 0] }}
+        transition={{ duration: 1.5, times: [0, 0.3, 0.85, 1], ease: 'easeOut' }}
+      >
+        <svg width={36} height={36} viewBox="0 0 40 40" aria-hidden>
+          <path d="M6 22 C6 6 34 6 34 22 L34 32 L26 32 L26 22 L14 22 L14 32 L6 32 Z" fill="#3f2a1d" stroke="#1c120c" strokeWidth={2} />
+          <path d="M8 10 C14 0 26 0 32 10" stroke="#111" strokeWidth={5} fill="none" />
+        </svg>
+      </motion.div>
+      {/* Spartans running in from both sides and raising their spears. */}
+      {[-1, 1].map((side) =>
+        [0, 1].map((k) => (
+          <motion.div
+            key={`${side}${k}`}
+            className="absolute"
+            style={{ top: 70, left: side * (150 + k * 46) - 22 }}
+            initial={{ x: side * window.innerWidth * 0.6 }}
+            animate={{ x: 0, y: [0, 0, -14, 0, -14, 0] }}
+            transition={{ duration: 2.4, x: { duration: 0.9, delay: 0.3 + k * 0.1, ease: 'easeOut' }, y: { duration: 2.4, delay: 0.3, times: [0, 0.5, 0.6, 0.7, 0.8, 1] } }}
+          >
+            <div style={{ transform: `scaleX(${-side})` }}>
+              <Spartan size={44} />
+            </div>
+          </motion.div>
+        )),
+      )}
+      {/* The wreath, floating down to where his head was. */}
+      <motion.div
+        className="absolute"
+        style={{ left: -60, top: -60 }}
+        initial={{ y: -scene.y - 100, rotate: -20, opacity: 0 }}
+        animate={{ y: [-scene.y - 100, -70, -80, -76], rotate: [-20, 8, -4, 0], opacity: [0, 1, 1, 1] }}
+        transition={{ duration: L, ease: 'easeOut', times: [0, 0.8, 0.9, 1] }}
+      >
+        <motion.div animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 1.2, delay: L, repeat: 2 }}>
+          <Laurel size={120} />
+        </motion.div>
+      </motion.div>
+      {/* Rose petals over the arena. */}
+      {petals.map((p, i) => (
+        <motion.span
+          key={`p${i}`}
+          className="absolute block"
+          style={{ left: p.x, top: -scene.y - 20, width: 10, height: 8, borderRadius: '70% 0 70% 0', background: i % 3 ? '#e11d48' : '#fb7185' }}
+          initial={{ opacity: 0 }}
+          animate={{ y: [0, window.innerHeight + 40], x: [0, p.sway, -p.sway / 2], rotate: [p.rot, p.rot + 540], opacity: [0, 1, 1, 0] }}
+          transition={{ duration: p.d, delay: p.delay, ease: 'linear' }}
+        />
+      ))}
+      <motion.div
+        className="absolute whitespace-nowrap text-center text-3xl font-black leading-tight"
+        style={{ left: -150, width: 300, top: 130, color: '#fde68a', WebkitTextStroke: '2px #78350f', textShadow: '0 3px 0 #78350f', fontFamily: "'Russo One', sans-serif" }}
+        initial={{ opacity: 0, scale: 0 }}
+        animate={{ opacity: [0, 0, 1, 1, 0], scale: [0, 0, 1.25, 1, 1] }}
+        transition={{ duration: 4, times: [0, L / 4, (L + 0.2) / 4, 0.88, 1] }}
+      >
+        НОВЫЙ ХОЗЯИН
+        <br />
+        АРЕНЫ
+      </motion.div>
     </At>
   );
 }

@@ -29,6 +29,7 @@ import { announceRankUps } from '../lib/rankEvents';
 import { weekRepsNow } from '../lib/training';
 import { weekKey } from '../lib/weekly';
 import { resetBriefed } from './BossBriefing';
+import { forgetFinale } from '../lib/finale';
 import { requestDevScene, type DevScene } from '../lib/devScene';
 
 /** Every ability scene, by whose it is, for the "play it" buttons. */
@@ -347,6 +348,7 @@ export function DevPanel({
               Сбросить способности
             </Action>
             <Action onClick={resetBriefed}>Разведку — заново</Action>
+            <Action onClick={forgetFinale}>Финал — заново</Action>
           </Row>
           {profile.replay && (
             <Row>
@@ -365,6 +367,7 @@ export function DevPanel({
             HP — чтобы проверить то, что срабатывает на половине здоровья (Шкипер, Фредди, Царь).
             «Сбросить способности» — кристаллы, заморозка, скример, отступление, казна и счёт повторов боя
             с нуля. «Разведку — заново» — досье на каждого босса снова всплывёт само.
+            «Финал — заново» — сцена с Кирюхой снова сыграет сама, когда откроется его этап (или сразу, если ты уже на нём).
           </p>
         </Group>
 

@@ -2,7 +2,7 @@
 /**
  * Lifts a figure off a plain white background, for pictures that come on white.
  *
- *   node scripts/cutout-white.mjs <in.jpg> <out.png> [height]
+ *   node scripts/cutout-white.mjs <in.jpg> <out.png> [height] [--keep-enclosed] [--trim]
  *
  * scripts/cutout.jxa.js (Vision) keeps only the main figure: anything lying apart from it — the
  * halves of a broken slab on the floor beside him — is dropped. Here the background is taken to be
@@ -13,12 +13,15 @@
  * White the figure shuts in — between a raised arm and the head — is found too, by being the
  * background's pure paper white rather than the greyer white painted in the picture.
  *
+ * --keep-enclosed turns that off, for a picture whose own white is as pure as the paper's (pixel
+ * letters drawn pure white on a sign). --trim crops the result to what's left.
+ *
  * The edge is then un-matted: a pixel on the rim is part figure, part white, and keeping its colour
  * as is leaves a pale halo that shows on a dark screen. Each rim pixel's alpha is taken from how
  * far it is from white, and the white is subtracted back out of its colour.
  */
 
-import { readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,9 +37,12 @@ const SOLID = 150;
 const ISLAND_MIN = 200;
 const PAPER = 244;
 
-const [, , input, output, height] = process.argv;
+const flags = process.argv.slice(2).filter((a) => a.startsWith('--'));
+const [input, output, height] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const keepEnclosed = flags.includes('--keep-enclosed');
+const trim = flags.includes('--trim');
 if (!input || !output) {
-  console.error('usage: node scripts/cutout-white.mjs <in.jpg> <out.png> [height]');
+  console.error('usage: node scripts/cutout-white.mjs <in.jpg> <out.png> [height] [--keep-enclosed] [--trim]');
   process.exit(1);
 }
 
@@ -78,7 +84,7 @@ try {
   // white that belongs to the picture (the letters on the slab) by being pure: the paper white of
   // the background, where painted white is a shade greyer.
   const seen = new Uint8Array(w * h);
-  for (let s = 0; s < w * h; s += 1) {
+  for (let s = 0; s < w * h && !keepEnclosed; s += 1) {
     if (bg[s] || seen[s] || minc(s) < WHITE) continue;
     const island = [s];
     seen[s] = 1;
@@ -132,11 +138,33 @@ try {
     p[o + 3] = Math.round(a * 255);
   }
 
+  let out = { width: w, height: h, pixels: p };
+  if (trim) {
+    let x0 = w;
+    let y0 = h;
+    let x1 = -1;
+    let y1 = -1;
+    for (let i = 0; i < w * h; i += 1) {
+      if (p[i * 4 + 3] > 16) {
+        const x = i % w;
+        const y = (i - x) / w;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    const tw = x1 - x0 + 1;
+    const th = y1 - y0 + 1;
+    const tp = Buffer.alloc(tw * th * 4);
+    for (let y = 0; y < th; y += 1) p.copy(tp, y * tw * 4, ((y0 + y) * w + x0) * 4, ((y0 + y) * w + x1 + 1) * 4);
+    out = { width: tw, height: th, pixels: tp };
+  }
   const cut = join(work, 'cut.png');
-  writeFileSync(cut, encodePng({ width: w, height: h, pixels: p }));
-  const args = height ? ['--resampleHeight', String(height), cut, '--out', output] : [cut, '--out', output];
-  execFileSync('sips', args, { stdio: 'ignore' });
-  console.log(`${output}: ${w}x${h}${height ? ` → height ${height}` : ''}`);
+  writeFileSync(cut, encodePng(out));
+  if (height) execFileSync('sips', ['--resampleHeight', String(height), cut, '--out', output], { stdio: 'ignore' });
+  else copyFileSync(cut, output);
+  console.log(`${output}: ${out.width}x${out.height}${height ? ` → height ${height}` : ''}`);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
