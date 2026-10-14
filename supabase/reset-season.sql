@@ -23,6 +23,21 @@ set total_pushups = 0,
     bosses_defeated = 0,
     rush_best_reps = 0;
 
+-- Ранги, лига недели и 1 на 1 (ranks.sql, duels.sql) — отдельно, чтобы файл работал и на базе,
+-- где эти скрипты ещё не запускали: там этих колонок просто нет.
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'players' and column_name = 'best_set') then
+    update public.players set best_set = 0, week_reps = 0, week_key = '';
+  end if;
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'players' and column_name = 'duel_rating') then
+    update public.players
+    set duel_rating = 1000, duel_wins = 0, duel_losses = 0, duel_draws = 0, rush_run = null;
+  end if;
+end $$;
+
 delete from public.saves;
 
 -- ─────────────────────────────────────────────────────────────────────────────

@@ -19,8 +19,9 @@
  *
  * 0 — the testing period, before the game was handed out.
  * 1 — the real start, 30 September 2026. Everything the testers piled up is wiped.
+ * 2 — a clean slate on 15 October 2026, after the move to Yandex Cloud.
  */
-export const SEASON = 1;
+export const SEASON = 2;
 
 /**
  * Is this save from a season that's over?
