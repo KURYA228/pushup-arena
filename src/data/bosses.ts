@@ -71,6 +71,11 @@ export interface BossDef {
    * in shadow. Boss and minions alike.
    */
   artLight?: boolean;
+  /**
+   * A portrait too tall for the fight screen's frame: shown there as a circle instead, cut from
+   * the picture at this `object-position` (helmet to hips for Kiryukha).
+   */
+  artCircle?: string;
 }
 
 /** Share of the stage budget taken by each minion, then by the boss. Sums to 1. */
@@ -96,6 +101,11 @@ interface RawBoss {
   /** Three, or none at all for a stage that is the boss alone — the whole budget is his. */
   minions: [string, string, string] | [];
   artLight?: boolean;
+  /**
+   * A portrait too tall for the fight screen's frame: shown there as a circle instead, cut from
+   * the picture at this `object-position` (helmet to hips for Kiryukha).
+   */
+  artCircle?: string;
 }
 
 const RAW: RawBoss[] = [
@@ -432,6 +442,7 @@ const RAW: RawBoss[] = [
     critMultiplier: 3.5,
     color: '#f59e0b',
     icon: '16-kiryukha.jpg',
+    artCircle: '50% 28%',
     // A fist into a wall of muscle on every rep (synthesised, `gladiatorPunch` in src/lib/feedback.ts).
     hitSound: 'gladiator',
     // His photo is dark, a statue in the dusk: the lighter vignette keeps his helmet out of shadow.
@@ -463,6 +474,7 @@ export const BOSSES: BossDef[] = RAW.map((r, index) => ({
   line: r.line,
   abilities: r.abilities,
   artLight: r.artLight,
+  artCircle: r.artCircle,
   minions: r.minions.map((name, i) => ({
     id: `${r.id}-m${i + 1}`,
     name,

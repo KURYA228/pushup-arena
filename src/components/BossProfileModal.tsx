@@ -4,6 +4,7 @@ import { RotateCcw, X } from 'lucide-react';
 import type { BossDef, BossStatus } from '../data/bosses';
 import { BOSSES } from '../data/bosses';
 import { abilityName, describeAbility } from '../data/abilities';
+import { AbilityIcon } from './AbilityIcon';
 import { BossIcon } from './BossIcon';
 import { VictoryCard } from './VictoryCard';
 
@@ -105,9 +106,12 @@ export function BossProfileModal({
 
         <div className="mt-3 space-y-1.5 text-left">
           {boss.abilities.map((a) => (
-            <div key={a.kind} className="rounded-xl border border-arena-amber/30 bg-arena-surface-2 px-3 py-2">
-              <p className="text-[11px] font-semibold text-arena-amber">{abilityName(a)}</p>
-              <p className="text-[11px] leading-snug text-arena-text-dim">{describeAbility(a)}</p>
+            <div key={a.kind} className="flex items-center gap-2.5 rounded-xl border border-arena-amber/30 bg-arena-surface-2 px-3 py-2">
+              <AbilityIcon kind={a.kind} className="!h-9 !w-9 shrink-0 text-[1.8rem] leading-none" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-arena-amber">{abilityName(a)}</p>
+                <p className="text-[11px] leading-snug text-arena-text-dim">{describeAbility(a)}</p>
+              </div>
             </div>
           ))}
         </div>

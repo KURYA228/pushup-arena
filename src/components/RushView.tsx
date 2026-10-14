@@ -308,6 +308,7 @@ export function RushView({
           final={final}
           rated={rival.id != null && rival.rating != null && !rivalSpent}
           myBest={profile.rushBestReps}
+          combo={combo}
         />
       ) : duelOver ? null : (
       <>
@@ -558,10 +559,13 @@ export function RushView({
                   <RefreshCw size={13} /> Новый соперник
                 </button>
                 <button
-                  onClick={() => startSession('solo')}
-                  className="flex-1 rounded-xl bg-arena-surface-2 py-2.5 text-xs font-medium text-arena-text-dim active:scale-[0.98]"
+                  onClick={() => {
+                    setMode('solo');
+                    setState('idle');
+                  }}
+                  className="flex-1 rounded-xl bg-arena-surface-2 py-2.5 text-xs font-medium text-white active:scale-[0.98]"
                 >
-                  Соло
+                  Назад
                 </button>
               </div>
             </motion.div>

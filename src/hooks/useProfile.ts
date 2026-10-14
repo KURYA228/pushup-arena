@@ -24,8 +24,9 @@ import { MAX_FREEZES, STARTING_FREEZES, advanceStreak, freezesOf, todayLocal } f
 import { packRun } from '../lib/ghost';
 import { DUEL_START, canDuel, logDuel, ratingDelta, type DuelOutcome } from '../data/duel';
 import { localDay } from '../lib/stats';
+import { TIER_XP, hardenAbilities } from '../data/abilities';
 import { DEFAULT_WEEKLY_GOAL, weekKey, weekStart, weeklyBonusXp } from '../lib/weekly';
-import { FREEZE_COST, UPGRADES, nextCost, perksFrom, upgradeLevel, type UpgradeId } from '../data/shop';
+import { CONSUMABLES, DOUBLE_REPS, FREEZE_COST, HUNTER_BONUS, RAGE_REPS, STOCK_FIELD, UPGRADES, nextCost, perksFrom, upgradeLevel, type ConsumableId, type UpgradeId } from '../data/shop';
 
 function defaultProfile(): ProfileRecord {
   return {
@@ -177,7 +178,10 @@ export function useProfile() {
     // A rematch reopens the arena even once every boss is down.
     const replaying = Boolean(profile.replay);
     const allBossesDefeated = profile.bossesDefeated.length >= BOSSES.length && !replaying;
-    return { ...levelInfo, rank, boss, bossIndex, stageStep, enemy, allBossesDefeated, replaying };
+    // In a later round the boss on screen is the sharpened one, so what he says he does is true.
+    const tier = profile.replay?.tier ?? 0;
+    const shown = tier > 0 ? { ...boss, abilities: hardenAbilities(boss.abilities, tier) } : boss;
+    return { ...levelInfo, rank, boss: shown, bossIndex, stageStep, enemy, allBossesDefeated, replaying, tier };
   }, [profile]);
 
   /**
@@ -188,6 +192,7 @@ export function useProfile() {
     const p = await ensureProfile();
     const bossIndex = Math.min(p.currentBossIndex, BOSSES.length - 1);
     const boss = BOSSES[bossIndex];
+    const tier = p.replay?.tier ?? 0;
 
     const outcome = resolveArenaRep(
       {
@@ -199,16 +204,21 @@ export function useProfile() {
       },
       Date.now(),
       Math.random(),
-      perksFrom(p.upgrades),
+      { ...perksFrom(p.upgrades), rage: (p.rageLeft ?? 0) > 0, ward: (p.wards ?? 0) > 0, double: (p.doubleLeft ?? 0) > 0, tier },
     );
 
     const st = advanceStreak(p, todayLocal());
-    const xpGained = Math.round(XP_PER_REP * streakMultiplier(st.streak) * outcome.xpFactor);
+    // A later round pays more for the harder fight.
+    const xpGained = Math.round(XP_PER_REP * streakMultiplier(st.streak) * outcome.xpFactor * (1 + TIER_XP * tier));
     const beforeLevel = levelFromTotalXp(p.totalXp).level;
 
     let bonusXp = 0;
     if (outcome.bossDefeated) bonusXp = getBossBonusXp(boss);
     else if (outcome.minionDefeated) bonusXp = getMinionBonusXp(boss.minions[p.stageStep]);
+    // «Метка охотника»: a kill pays more.
+    bonusXp = Math.round(bonusXp * (1 + HUNTER_BONUS * upgradeLevel(p.upgrades, 'hunter')));
+    /** The rep was at a minion — what «Двойной удар» counts down on. */
+    const atMinion = encounterAt(boss, p.stageStep).isBoss === false;
 
     const totalXp = p.totalXp + xpGained + bonusXp;
     const updated: ProfileRecord = {
@@ -223,16 +233,24 @@ export function useProfile() {
       enemyHp: Math.max(0, outcome.next.enemyHp),
       bossesDefeated: outcome.next.bossesDefeated,
       fight: outcome.next.fight,
+      // The potion runs down rep by rep; a charm that worked is gone.
+      rageLeft: Math.max(0, (p.rageLeft ?? 0) - 1),
+      doubleLeft: atMinion ? Math.max(0, (p.doubleLeft ?? 0) - 1) : p.doubleLeft,
+      wards: Math.max(0, (p.wards ?? 0) - (outcome.warded ? 1 : 0)),
     };
     // A replay walks the stages again from the one chosen — minions, boss, next stage — and ends
     // when it catches up: the moment it reaches the stage the real progress was on, that progress
     // comes back exactly as it was left (the same minion, the same HP). Beating the last boss
     // again ends it too, there being nowhere further to walk.
+    // A new round isn't a catch-up: it runs the whole arena, to the last boss.
     const replayWon =
       Boolean(p.replay) &&
       outcome.bossRebeaten &&
-      (outcome.next.bossIndex === p.replay?.returnTo.currentBossIndex || bossIndex >= BOSSES.length - 1);
+      (tier > 0
+        ? bossIndex >= BOSSES.length - 1
+        : outcome.next.bossIndex === p.replay?.returnTo.currentBossIndex || bossIndex >= BOSSES.length - 1);
     if (replayWon && p.replay) {
+      if (tier > 0) updated.cycle = Math.max(p.cycle ?? 0, tier);
       Object.assign(updated, {
         currentBossIndex: p.replay.returnTo.currentBossIndex,
         stageStep: p.replay.returnTo.stageStep,
@@ -271,6 +289,7 @@ export function useProfile() {
       rankUps,
       blocked: outcome.blocked,
       events: outcome.events,
+      warded: outcome.warded,
       healed: outcome.healed,
       enemyName: outcome.enemyName,
       newAchievements,
@@ -289,6 +308,11 @@ export function useProfile() {
         achievementsGranted: newAchievements,
         streakBefore: streakSnapshot(p),
         trainingBefore: trainingSnapshot(p),
+        itemsSpent: {
+          rageReps: (p.rageLeft ?? 0) > 0 ? 1 : 0,
+          wards: outcome.warded ? 1 : 0,
+          doubleReps: atMinion && (p.doubleLeft ?? 0) > 0 ? 1 : 0,
+        },
         logId,
       },
     };
@@ -375,7 +399,7 @@ export function useProfile() {
         fight: p.fight,
       },
       Date.now(),
-      perksFrom(p.upgrades),
+      { ...perksFrom(p.upgrades), tier: p.replay?.tier ?? 0 },
     );
     if (healed <= 0) return 0;
     await db.profile.put({ ...p, enemyHp: state.enemyHp, fight: state.fight });
@@ -447,6 +471,10 @@ export function useProfile() {
         ? p.achievementsUnlocked.filter((id) => !undo.achievementsGranted.includes(id))
         : p.achievementsUnlocked,
     };
+    // The potion's rep and a charm the rep spent come back with it.
+    if (undo.itemsSpent?.rageReps) updated.rageLeft = Math.min(RAGE_REPS, (p.rageLeft ?? 0) + undo.itemsSpent.rageReps);
+    if (undo.itemsSpent?.wards) updated.wards = (p.wards ?? 0) + undo.itemsSpent.wards;
+    if (undo.itemsSpent?.doubleReps) updated.doubleLeft = Math.min(DOUBLE_REPS, (p.doubleLeft ?? 0) + undo.itemsSpent.doubleReps);
     if (undo.bossIndexBefore != null && undo.enemyHpBefore != null && undo.stageStepBefore != null) {
       updated.currentBossIndex = undo.bossIndexBefore;
       updated.stageStep = undo.stageStepBefore;
@@ -470,7 +498,7 @@ export function useProfile() {
    * when you leave (see `endReplay`). Refused while another replay is on, or for a boss not yet
    * beaten.
    */
-  const startReplay = useCallback(async (bossIndex: number): Promise<boolean> => {
+  const startReplay = useCallback(async (bossIndex: number, tier = 0): Promise<boolean> => {
     return db.transaction('rw', db.profile, async () => {
       const p = await ensureProfile();
       const boss = BOSSES[bossIndex];
@@ -482,6 +510,7 @@ export function useProfile() {
         replay: {
           bossIndex,
           startedAt: Date.now(),
+          ...(tier > 0 ? { tier } : {}),
           returnTo: { currentBossIndex: p.currentBossIndex, stageStep: p.stageStep, enemyHp: p.enemyHp, fight: p.fight },
         },
         currentBossIndex: bossIndex,
@@ -541,6 +570,49 @@ export function useProfile() {
     });
   }, []);
 
+  /** Buys one potion or charm, up to what can be held. */
+  const buyConsumable = useCallback(async (id: ConsumableId): Promise<boolean> => {
+    const def = CONSUMABLES[id];
+    return db.transaction('rw', db.profile, db.reps, async () => {
+      const p = await ensureProfile();
+      const field = STOCK_FIELD[id];
+      const have = p[field] ?? 0;
+      if (have >= def.max || p.totalXp < def.cost) return false;
+      await db.profile.put({ ...p, totalXp: p.totalXp - def.cost, [field]: have + 1 });
+      return true;
+    });
+  }, []);
+
+  /** Drinks a «Зелье ярости»: the next RAGE_REPS arena reps hit twice as hard. Not while one is working. */
+  const drinkRage = useCallback(async (): Promise<boolean> => {
+    return db.transaction('rw', db.profile, async () => {
+      const p = await ensureProfile();
+      if (!(p.rage ?? 0) || (p.rageLeft ?? 0) > 0) return false;
+      await db.profile.put({ ...p, rage: (p.rage ?? 0) - 1, rageLeft: RAGE_REPS });
+      return true;
+    });
+  }, []);
+
+  /** Switches a «Двойной удар» on: the next DOUBLE_REPS minion reps land twice. Not while one is on. */
+  const activateDouble = useCallback(async (): Promise<boolean> => {
+    return db.transaction('rw', db.profile, async () => {
+      const p = await ensureProfile();
+      if (!(p.doubles ?? 0) || (p.doubleLeft ?? 0) > 0) return false;
+      await db.profile.put({ ...p, doubles: (p.doubles ?? 0) - 1, doubleLeft: DOUBLE_REPS });
+      return true;
+    });
+  }, []);
+
+  /** Spends one «Песочные часы» on the rest about to start; false when there are none. */
+  const spendHourglass = useCallback(async (): Promise<boolean> => {
+    return db.transaction('rw', db.profile, async () => {
+      const p = await ensureProfile();
+      if (!(p.hourglasses ?? 0)) return false;
+      await db.profile.put({ ...p, hourglasses: (p.hourglasses ?? 0) - 1 });
+      return true;
+    });
+  }, []);
+
   /**
    * Replaces the whole local profile with one pulled from the cloud. Kept separate from the dev
    * backdoor because this is a real user action, and the id must stay ours no matter what the
@@ -591,6 +663,10 @@ export function useProfile() {
     revertRep,
     buyUpgrade,
     buyFreeze,
+    buyConsumable,
+    drinkRage,
+    activateDouble,
+    spendHourglass,
     setWeeklyGoal,
     restoreProfile,
     devPatchProfile,

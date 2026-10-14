@@ -68,36 +68,51 @@ function Corner({
       transition={{ type: 'spring', stiffness: 260, damping: 20, delay: 0.1 }}
       className="flex min-w-0 flex-col items-center"
     >
-      <motion.div
-        className="relative"
-        animate={
-          settled && won && !calm
-            ? { scale: [1, 1.18, 1.08], rotate: 0 }
-            : settled && lost
-              ? { scale: 0.92, rotate: calm ? 0 : 6 * dir, filter: 'grayscale(0.85) brightness(0.7)' }
-              : {}
-        }
-        transition={{ duration: 0.5 }}
-      >
+      {/* The face stays where it is; the win and the loss are drawn on and around it. */}
+      <div className="relative">
+        {settled && won && (
+          <>
+            <motion.span
+              aria-hidden
+              className="absolute -inset-[6px] rounded-full"
+              style={{ background: `conic-gradient(from 0deg, transparent, ${color} 25%, transparent 50%, ${color} 75%, transparent)` }}
+              initial={{ opacity: 0 }}
+              animate={calm ? { opacity: 1 } : { opacity: 1, rotate: 360 }}
+              transition={calm ? { duration: 0.2 } : { opacity: { duration: 0.3 }, rotate: { duration: 2, repeat: Infinity, ease: 'linear' } }}
+            />
+            <motion.span
+              aria-hidden
+              className="absolute -inset-1.5 rounded-full"
+              style={{ boxShadow: `0 0 28px ${color}` }}
+              animate={calm ? {} : { opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            {!calm && <Burst count={16} spread={60} />}
+          </>
+        )}
         {/* The crown drops onto the winner. */}
         {settled && won && (
           <motion.span
             initial={calm ? false : { y: -26, opacity: 0, rotate: -25 }}
-            animate={{ y: 0, opacity: 1, rotate: -12 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 12 }}
+            animate={calm ? { y: 0, opacity: 1, rotate: -12 } : { y: [0, -3, 0], opacity: 1, rotate: -12 }}
+            transition={calm ? {} : { y: { duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: 0.4 }, default: { type: 'spring', stiffness: 420, damping: 12 } }}
             className="absolute -top-4 left-1/2 z-10 -translate-x-1/2 text-arena-amber drop-shadow-[0_0_8px_rgba(245,158,11,0.9)]"
           >
             <Crown size={22} fill="currentColor" />
           </motion.span>
         )}
-        <div className="rounded-full transition-shadow duration-500" style={{ boxShadow: settled && won ? `0 0 26px ${color}` : 'none' }}>
+        <motion.div
+          className="relative rounded-full bg-arena-surface"
+          animate={{ filter: settled && lost ? 'grayscale(0.85) brightness(0.7)' : 'grayscale(0) brightness(1)' }}
+          transition={{ duration: 0.5 }}
+        >
           {side.emoji ? (
             <span className="flex h-16 w-16 items-center justify-center rounded-full bg-arena-surface-2 text-3xl">{side.emoji}</span>
           ) : (
             <Avatar name={side.name} avatar={side.avatar} level={side.level} size="lg" />
           )}
-        </div>
-      </motion.div>
+        </motion.div>
+      </div>
       <p className="mt-1.5 max-w-full truncate text-sm font-bold text-arena-text">{side.name}</p>
       <motion.span
         animate={settled && won && !calm ? { scale: [1, 1.35, 1] } : {}}
@@ -185,6 +200,21 @@ export function DuelResult({
 
       {/* The verdict: a stamp that slams down over the top of the card. */}
       <div className="relative flex h-14 items-center justify-center">
+        {/* A win gets sunrays turning slowly behind the word. */}
+        {verdict && outcome === 'win' && !calm && (
+          <motion.span
+            aria-hidden
+            className="pointer-events-none absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{
+              background: 'repeating-conic-gradient(rgba(245,158,11,0.22) 0deg 10deg, transparent 10deg 24deg)',
+              maskImage: 'radial-gradient(circle, black 15%, transparent 65%)',
+              WebkitMaskImage: 'radial-gradient(circle, black 15%, transparent 65%)',
+            }}
+            initial={{ opacity: 0, scale: 0.4 }}
+            animate={{ opacity: 1, scale: 1, rotate: 360 }}
+            transition={{ opacity: { duration: 0.4 }, scale: { duration: 0.5 }, rotate: { duration: 18, repeat: Infinity, ease: 'linear' } }}
+          />
+        )}
         {verdict && (
           <motion.span
             initial={calm ? false : { scale: 3.2, rotate: -18, opacity: 0 }}
@@ -195,6 +225,16 @@ export function DuelResult({
           >
             {word}
           </motion.span>
+        )}
+        {/* A loss gets a slash torn through it. */}
+        {verdict && outcome === 'loss' && !calm && (
+          <motion.span
+            aria-hidden
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[3px] w-56 -translate-x-1/2 -translate-y-1/2 -rotate-[14deg] rounded-full bg-white shadow-[0_0_12px_rgba(239,68,68,0.9)]"
+            initial={{ scaleX: 0, opacity: 1 }}
+            animate={{ scaleX: [0, 1, 1], opacity: [1, 1, 0] }}
+            transition={{ duration: 0.7, times: [0, 0.35, 1], delay: 0.15, ease: 'easeOut' }}
+          />
         )}
         {verdict && outcome === 'win' && <Burst count={34} spread={140} duration={1.1} confetti />}
         {verdict && outcome !== 'loss' && <Burst count={16} spread={90} />}

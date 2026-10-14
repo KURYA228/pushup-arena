@@ -15,6 +15,7 @@ import { LeaderboardView } from './components/LeaderboardView';
 import { StatsView } from './components/StatsView';
 import { AuthView } from './components/AuthView';
 import { Intro, type IntroExit } from './components/Intro';
+import { nextTier } from './data/abilities';
 import { SyncGate } from './components/SyncGate';
 import { hasSeenIntro } from './lib/intro';
 import { useCloud } from './hooks/useCloud';
@@ -61,6 +62,10 @@ function App() {
     tickArena,
     buyUpgrade,
     buyFreeze,
+    buyConsumable,
+    drinkRage,
+    activateDouble,
+    spendHourglass,
     setWeeklyGoal,
     restoreProfile,
     devPatchProfile,
@@ -145,6 +150,7 @@ function App() {
                 derived={derived}
                 buyUpgrade={buyUpgrade}
                 buyFreeze={buyFreeze}
+                buyConsumable={buyConsumable}
                 setWeeklyGoal={setWeeklyGoal}
                 onPurchased={feedback.purchase}
                 onReplay={(i) => {
@@ -164,6 +170,11 @@ function App() {
                 feedback={feedback}
                 notify={push}
                 endReplay={endReplay}
+                drinkRage={drinkRage}
+                activateDouble={activateDouble}
+                spendHourglass={spendHourglass}
+                me={{ name: cloud.session ? (cloud.name ?? null) : null, avatar: cloud.session ? cloud.avatar : null, level: derived.level }}
+                onReplayAll={() => void startReplay(0, nextTier(profile.cycle))}
               />
             )}
             {view === 'stats' && <StatsView profile={profile} />}

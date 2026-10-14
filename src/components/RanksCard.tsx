@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SET_BREAK_MS } from '../data/abilities';
 import { TierIcon } from './TierIcon';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -169,7 +169,7 @@ function RanksSheet({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       onClick={onClose}
-      className="safe-top safe-x fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm"
+      className="safe-top safe-x fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-4 backdrop-blur-sm"
     >
       <motion.div
         role="dialog"
@@ -180,7 +180,9 @@ function RanksSheet({
         exit={{ y: 20, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 260, damping: 26 }}
         onClick={(e) => e.stopPropagation()}
-        className="relative max-h-full w-full max-w-md overflow-y-auto rounded-3xl border border-arena-border bg-arena-surface p-5"
+        // One height whichever ladder is on show: they're different lengths, and a centred sheet
+        // that grew and shrank with each tab jumped up and down under the finger.
+        className="relative flex h-[min(680px,100%)] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-arena-border bg-arena-surface p-5"
       >
         <button
           onClick={onClose}
@@ -216,6 +218,9 @@ function RanksSheet({
           ))}
         </div>
 
+        {/* The ladders scroll inside the sheet; the header and tabs above stay put. */}
+        {/* `relative` so the steps measure their offsets from it — Ladder scrolls to yours. */}
+        <div className="relative -mx-5 min-h-0 flex-1 overflow-y-auto px-5 pb-1">
         {tab === 'level' && (
         <Ladder
           title="Звание"
@@ -264,6 +269,7 @@ function RanksSheet({
           }))}
         />
         )}
+        </div>
       </motion.div>
     </motion.div>
   );
@@ -278,19 +284,25 @@ function Ladder({
   about: string;
   steps: { key: string; icon: string; name: string; color: string; need: string; extra?: string; current: boolean; reached: boolean }[];
 }) {
+  // Each ladder opens on where you stand on it: your step brought to the middle of the list.
+  // A ladder mounts afresh on every tab, so switching tabs lands on yours there too. Offsets,
+  // not on-screen positions: the sheet is still springing in when this runs.
+  const currentRef = useRef<HTMLLIElement | null>(null);
+  useEffect(() => {
+    const li = currentRef.current;
+    const box = li?.offsetParent as HTMLElement | null;
+    if (!li || !box) return;
+    box.scrollTop = Math.max(0, li.offsetTop - (box.clientHeight - li.offsetHeight) / 2);
+  }, []);
   return (
-    <motion.section
-      initial={{ opacity: 0, x: 12 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-      className="mt-4"
-    >
+    <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }} className="mt-4">
       <h3 className="text-sm font-bold text-arena-text">{title}</h3>
       <p className="mt-0.5 text-[11px] leading-snug text-arena-text-dim">{about}</p>
       <ol className="mt-2 space-y-1.5">
         {steps.map((s) => (
           <li
             key={s.key}
+            ref={s.current ? currentRef : undefined}
             className={clsx(
               'flex items-center gap-3 rounded-xl border px-3 py-2',
               s.current ? 'bg-arena-surface-2' : 'border-transparent bg-arena-bg/40',

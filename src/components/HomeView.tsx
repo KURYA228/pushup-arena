@@ -14,7 +14,7 @@ import { ShopModal } from './ShopModal';
 import { WeeklyGoal } from './WeeklyGoal';
 import { RanksCard } from './RanksCard';
 import { FEEDBACK_FORM_URL } from '../lib/feedbackForm';
-import type { UpgradeId } from '../data/shop';
+import type { ConsumableId, UpgradeId } from '../data/shop';
 import { CountUp } from './CountUp';
 import { nextRank } from '../data/ranks';
 import { HelpModal } from './HelpModal';
@@ -31,6 +31,7 @@ export function HomeView({
   derived,
   buyUpgrade,
   buyFreeze,
+  buyConsumable,
   setWeeklyGoal,
   onPurchased,
   onReplay,
@@ -39,6 +40,7 @@ export function HomeView({
   derived: Derived;
   buyUpgrade: (id: UpgradeId) => Promise<boolean>;
   buyFreeze: () => Promise<boolean>;
+  buyConsumable: (id: ConsumableId) => Promise<boolean>;
   setWeeklyGoal: (goal: number, daily: number | null) => Promise<void>;
   onPurchased: () => void;
   /** Starts a rematch with a beaten boss and takes you to the fight. */
@@ -363,6 +365,7 @@ export function HomeView({
             profile={profile}
             buyUpgrade={buyUpgrade}
             buyFreeze={buyFreeze}
+            buyConsumable={buyConsumable}
             onPurchased={onPurchased}
             onClose={() => setShopOpen(false)}
           />

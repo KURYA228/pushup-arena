@@ -294,7 +294,15 @@ export function usePoseDetection(onRep: () => void) {
   const [aspect, setAspect] = useState(3 / 4);
   const [snapshot, setSnapshot] = useState<DetectorSnapshot>(() => detectorRef.current!.snapshot());
 
-  const drawSkeleton = useCallback((landmarks: NormalizedLandmark[] | undefined, vision: VisionModule) => {
+  /** Until when the skeleton flashes bright green: the moment a rep has just counted. */
+  const flashUntilRef = useRef(0);
+
+  /**
+   * The skeleton over the picture. Amber while you're working; green once you're low enough that
+   * coming back up will count (the detector is in its "down" phase); and a bright green flash
+   * the instant a rep is counted.
+   */
+  const drawSkeleton = useCallback((landmarks: NormalizedLandmark[] | undefined, vision: VisionModule, armed: boolean, now: number) => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
     if (!canvas || !video) return;
@@ -306,14 +314,22 @@ export function usePoseDetection(onRep: () => void) {
     if (!landmarks) return;
     if (!drawingUtilsRef.current) drawingUtilsRef.current = new vision.DrawingUtils(ctx);
     const du = drawingUtilsRef.current;
-    du.drawConnectors(landmarks, vision.PoseLandmarker.POSE_CONNECTIONS, {
-      color: 'rgba(245, 158, 11, 0.4)',
-      lineWidth: 3,
-    });
-    du.drawLandmarks(landmarks, { color: 'rgba(245, 158, 11, 0.8)', radius: 3 });
+    const flash = now < flashUntilRef.current;
+    const tone = flash
+      ? { line: 'rgba(74, 222, 128, 0.95)', point: '#bbf7d0', arm: '#4ade80', width: 6 }
+      : armed
+        ? { line: 'rgba(34, 197, 94, 0.75)', point: 'rgba(34, 197, 94, 0.95)', arm: '#22c55e', width: 4 }
+        : { line: 'rgba(245, 158, 11, 0.4)', point: 'rgba(245, 158, 11, 0.8)', arm: '#f59e0b', width: 3 };
+    if (flash || armed) {
+      ctx.shadowColor = tone.arm;
+      ctx.shadowBlur = flash ? 18 : 8;
+    }
+    du.drawConnectors(landmarks, vision.PoseLandmarker.POSE_CONNECTIONS, { color: tone.line, lineWidth: tone.width });
+    du.drawLandmarks(landmarks, { color: tone.point, radius: 3 });
     // Highlight the arms, since they're what the count actually depends on.
     const armPoints = ARMS.flatMap((a) => [landmarks[a.shoulder], landmarks[a.elbow], landmarks[a.wrist]]);
-    du.drawLandmarks(armPoints, { color: '#f59e0b', radius: 6 });
+    du.drawLandmarks(armPoints, { color: tone.arm, radius: flash ? 8 : 6 });
+    ctx.shadowBlur = 0;
   }, []);
 
   const teardown = useCallback(() => {
@@ -419,8 +435,6 @@ export function usePoseDetection(onRep: () => void) {
           const result = landmarker.detectForVideo(v, now);
           const screen = result.landmarks[0];
           const world = result.worldLandmarks[0];
-          drawSkeleton(screen, vis);
-
           const detector = detectorRef.current!;
           if (!screen || !world) {
             detector.markPoseLost();
@@ -432,10 +446,16 @@ export function usePoseDetection(onRep: () => void) {
               setQuality('arm-hidden');
             } else {
               setQuality('ok');
-              if (detector.push(sample, now)) onRepRef.current();
+              if (detector.push(sample, now)) {
+                flashUntilRef.current = now + 350;
+                onRepRef.current();
+              }
             }
           }
-          setSnapshot(detector.snapshot());
+          const snap = detector.snapshot();
+          // Drawn after the detector has seen the frame, so the colour says where this rep stands now.
+          drawSkeleton(screen, vis, snap.phase === 'down', now);
+          setSnapshot(snap);
 
           frameErrorsRef.current = 0;
           const c = fpsCounterRef.current;

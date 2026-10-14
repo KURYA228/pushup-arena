@@ -333,7 +333,7 @@ export function DuelVersus({
         >
           <RefreshCw size={13} /> Другой соперник
         </button>
-        <button onClick={onBack} className="flex-1 rounded-xl bg-arena-surface-2 py-2.5 text-xs font-medium text-arena-text-dim active:scale-[0.98]">
+        <button onClick={onBack} className="flex-1 rounded-xl bg-arena-surface-2 py-2.5 text-xs font-medium text-white active:scale-[0.98]">
           Назад
         </button>
       </div>

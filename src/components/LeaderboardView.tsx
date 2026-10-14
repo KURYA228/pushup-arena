@@ -185,7 +185,7 @@ export function LeaderboardView({
           aria-label="Сменить аватарку"
           className="relative shrink-0 rounded-full active:scale-95"
         >
-          <Avatar name={cloud.name} avatar={cloud.avatar} size="md" level={myIndex >= 0 ? ordered[myIndex].level : undefined} />
+          <Avatar name={cloud.name} avatar={cloud.avatar} size="md" level={myIndex >= 0 ? ordered[myIndex].level : undefined} noCrown={myIndex === 0} />
           <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-arena-border bg-arena-surface-2 text-arena-text">
             <Pencil size={10} />
           </span>
@@ -347,6 +347,8 @@ function Podium({ rows, sortId, myId }: { rows: LeaderboardRow[]; sortId: SortId
                 name={row.displayName}
                 avatar={row.avatar}
                 level={row.level}
+                // First place wears the board's crown above; the title's would be a second one.
+                noCrown={place === 0}
                 size={place === 0 ? 'md' : 'sm'}
                 className={place === 0 ? 'arena-glow' : undefined}
               />
@@ -449,7 +451,7 @@ function Row({
       )}
     >
       <RankMark rank={rank} />
-      <Avatar name={row.displayName} avatar={row.avatar} size="sm" level={row.level} />
+      <Avatar name={row.displayName} avatar={row.avatar} size="sm" level={row.level} noCrown={rank === 1} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate text-sm font-semibold" style={{ color: getRank(row.level).color }}>
           <span className="truncate">{row.displayName}</span>

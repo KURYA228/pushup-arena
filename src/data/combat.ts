@@ -14,12 +14,14 @@ import {
   abilityValue,
   critLands,
   damageDealt,
+  hardenAbilities,
   hasAbility,
   xpMultiplier,
+  type AbilityKind,
   type BossAbility,
 } from './abilities.ts';
 import { BOSSES, BOSS_STEP, encounterAt, firstStep } from './bosses.ts';
-import { NO_PERKS, type PlayerPerks } from './shop.ts';
+import { NO_PERKS, RAGE_MULT, type PlayerPerks } from './shop.ts';
 
 /**
  * Arena combat, as one pure function.
@@ -142,6 +144,8 @@ export interface RepOutcome {
   xpFactor: number;
   /** Ability moments this rep set off, in the order they happened. */
   events: AbilityEvent[];
+  /** The ability an «Оберег» cancelled on this rep — one charm is spent; null when none was. */
+  warded: AbilityKind | null;
 }
 
 export function freshFight(enemyHp: number): FightState {
@@ -186,7 +190,9 @@ export function applyIdleRegen(
   now: number,
   perks: PlayerPerks = NO_PERKS,
 ): { state: ArenaState; healed: number } {
-  const boss = BOSSES[Math.min(state.bossIndex, BOSSES.length - 1)];
+  const raw = BOSSES[Math.min(state.bossIndex, BOSSES.length - 1)];
+  // A later round's boss heals harder (and the King's elixir comes sooner).
+  const boss = { ...raw, abilities: hardenAbilities(raw.abilities, perks.tier ?? 0) };
   const enemy = encounterAt(boss, state.stageStep);
   const from = state.fight.regenAt;
   // "Эликсир" (the King) is the same clock with a longer tick and the whole bar back on it.
@@ -258,9 +264,12 @@ export function resolveArenaRep(
   const boss = BOSSES[bossIndex];
   const step = state.stageStep;
   const enemy = encounterAt(boss, step);
-  // Minion-facing abilities still belong to the stage's boss, so they're read from the boss.
-  const abilities = enemy.isBoss ? boss.abilities : [];
-  const stageAbilities = boss.abilities;
+  // Minion-facing abilities still belong to the stage's boss, so they're read from the boss —
+  // as sharpened for this round of the arena.
+  const tier = perks.tier ?? 0;
+  const hardened = hardenAbilities(boss.abilities, tier);
+  const abilities = enemy.isBoss ? hardened : [];
+  const stageAbilities = hardened;
 
   // Regeneration is settled first and by the clock, so the reps that follow hit the HP the boss
   // actually has after your rest — not the HP you left him on.
@@ -271,6 +280,21 @@ export function resolveArenaRep(
 
   const events: AbilityEvent[] = [];
 
+  // «Оберег»: one charm, one cancelled ability, against a boss only. `ward(kind)` is asked at
+  // the moment an ability would act; true means it doesn't, and the charm is gone for this rep.
+  let warded: AbilityKind | null = null;
+  const ward = (kind: AbilityKind): boolean => {
+    if (!perks.ward || warded || !enemy.isBoss) return false;
+    warded = kind;
+    return true;
+  };
+
+  // «Бронебой» thins "Толстокожесть" before any blow is worked out.
+  const struck =
+    perks.armorPierce > 0
+      ? abilities.map((a) => (a.kind === 'armor' ? { ...a, value: Math.max(0, a.value - perks.armorPierce) } : a))
+      : abilities;
+
   // --- settle the pause that just ended -------------------------------------------------
   const gap = fight.lastRepAt == null ? 0 : now - fight.lastRepAt;
   const setEnded = fight.lastRepAt == null || gap >= SET_BREAK_MS + perks.breathMs;
@@ -279,14 +303,18 @@ export function resolveArenaRep(
     if (enemy.isBoss && hasAbility(abilities, 'bloodDebt')) {
       const refund = Math.round(fight.damageThisSet * abilityValue(abilities, 'bloodDebt'));
       const after = Math.min(fight.enemyMaxHp, enemyHp + refund);
-      healed += after - enemyHp;
-      enemyHp = after;
+      if (after > enemyHp && !ward('bloodDebt')) {
+        healed += after - enemyHp;
+        enemyHp = after;
+      }
     }
     if (enemy.isBoss && hasAbility(abilities, 'noStop') && gap >= NO_STOP_MS + perks.breathMs) {
       // Everything landed since the set began is undone, not merely reduced.
       const after = Math.min(fight.enemyMaxHp, Math.max(enemyHp, fight.hpAtSetStart));
-      healed += after - enemyHp;
-      enemyHp = after;
+      if (after > enemyHp && !ward('noStop')) {
+        healed += after - enemyHp;
+        enemyHp = after;
+      }
     }
     // "Командная работа": a set that ended too short is covered by the Titans — undone.
     if (
@@ -296,7 +324,7 @@ export function resolveArenaRep(
       fight.damageThisSet > 0
     ) {
       const after = Math.min(fight.enemyMaxHp, Math.max(enemyHp, fight.hpAtSetStart));
-      if (after > enemyHp) {
+      if (after > enemyHp && !ward('teamwork')) {
         healed += after - enemyHp;
         enemyHp = after;
         events.push('covered');
@@ -306,7 +334,7 @@ export function resolveArenaRep(
     // count starts again — he doesn't go away until you've done it.
     if (fight.scream && fight.scream.reps < abilityValue(abilities, 'scream')) {
       const after = Math.min(fight.enemyMaxHp, Math.max(enemyHp, fight.scream.hp));
-      if (after > enemyHp) {
+      if (after > enemyHp && !ward('scream')) {
         healed += after - enemyHp;
         enemyHp = after;
         events.push('scream-burned');
@@ -319,10 +347,13 @@ export function resolveArenaRep(
       if (fight.soupHeat >= SOUP_BOILS_AFTER) {
         const max = fight.enemyMaxHp;
         const after = Math.min(max, enemyHp + Math.max(1, Math.round(max * abilityValue(abilities, 'turtleSoup'))));
-        healed += after - enemyHp;
-        enemyHp = after;
+        // Warded, the pot boils over and goes cold with nobody fed.
+        if (!ward('turtleSoup')) {
+          healed += after - enemyHp;
+          enemyHp = after;
+          events.push('soup');
+        }
         fight.soupHeat = 0;
-        events.push('soup');
       }
     }
     fight.lastStandReps = 0;
@@ -333,7 +364,8 @@ export function resolveArenaRep(
     enemy.isBoss &&
     hasAbility(abilities, 'freezeRay') &&
     fight.lastRepAt != null &&
-    gap >= FREEZE_PAUSE_MS + perks.breathMs
+    gap >= FREEZE_PAUSE_MS + perks.breathMs &&
+    !ward('freezeRay')
   ) {
     fight.frozenLeft = abilityValue(abilities, 'freezeRay');
     events.push('frozen');
@@ -394,7 +426,7 @@ export function resolveArenaRep(
     // "Дань": counted by the set, so a long set pays more of it than a short one — but the
     // first six of every set are always yours.
     blocked = 'tribute';
-  } else if (enemy.isBoss && hasAbility(abilities, 'piggyBank') && fight.repsOnEnemy % PIGGY_EVERY === 0) {
+  } else if (enemy.isBoss && hasAbility(abilities, 'piggyBank') && fight.repsOnEnemy % PIGGY_EVERY === 0 && !ward('piggyBank')) {
     const max = fight.enemyMaxHp;
     const after = Math.min(max, enemyHp + Math.max(1, Math.round(max * abilityValue(abilities, 'piggyBank'))));
     healed += after - enemyHp;
@@ -410,13 +442,14 @@ export function resolveArenaRep(
     isCrit = critLands(abilities, rolled);
     if (rolled && !isCrit && enemy.isBoss) events.push('crit-blocked');
     const hit = damageDealt(
-      boss.baseDamage * perks.damageMult,
+      boss.baseDamage * perks.damageMult * (perks.rage ? RAGE_MULT : 1),
       boss.critMultiplier + perks.critMultBonus,
       isCrit,
-      abilities,
+      struck,
       fight.enemyMaxHp > 0 ? enemyHp / fight.enemyMaxHp : 1,
     );
-    if (isCrit && enemy.isBoss && hasAbility(abilities, 'jokerCard')) {
+    // Warded, the Joker's card is just a crit — and lands as one.
+    if (isCrit && enemy.isBoss && hasAbility(abilities, 'jokerCard') && !ward('jokerCard')) {
       // "Карта-джокер": the crit is the joke — on you. It heals him instead.
       const after = Math.min(fight.enemyMaxHp, enemyHp + Math.max(1, Math.round(hit * abilityValue(abilities, 'jokerCard'))));
       healed += after - enemyHp;
@@ -424,7 +457,8 @@ export function resolveArenaRep(
       isCrit = false;
       blocked = 'joke';
     } else {
-      damage = hit;
+      // «Двойной удар»: against a minion the blow lands twice.
+      damage = perks.double && !enemy.isBoss ? hit * 2 : hit;
       // "Кристаллы Края": while any stands, the dragon takes half.
       if (enemy.isBoss && hasAbility(abilities, 'endCrystals') && (fight.crystalsBroken ?? 0) < END_CRYSTALS) {
         damage = Math.max(1, Math.round(damage * CRYSTAL_SHIELD));
@@ -465,23 +499,30 @@ export function resolveArenaRep(
 
   // --- below half: Skipper falls back, Freddy jumps out, the tsar opens his treasury -----
   const belowHalf = enemyHp > 0 && fight.enemyMaxHp > 0 && enemyHp < fight.enemyMaxHp * HALF_HP;
+  // Each of these happens once a fight; a ward spends it without letting it happen.
   if (belowHalf && enemy.isBoss && hasAbility(abilities, 'retreat') && !fight.retreatUsed) {
-    const after = Math.min(fight.enemyMaxHp, enemyHp + Math.round(fight.enemyMaxHp * abilityValue(abilities, 'retreat')));
-    healed += after - enemyHp;
-    enemyHp = after;
     fight.retreatUsed = true;
-    events.push('retreat');
+    if (!ward('retreat')) {
+      const after = Math.min(fight.enemyMaxHp, enemyHp + Math.round(fight.enemyMaxHp * abilityValue(abilities, 'retreat')));
+      healed += after - enemyHp;
+      enemyHp = after;
+      events.push('retreat');
+    }
   }
   if (belowHalf && enemy.isBoss && hasAbility(abilities, 'scream') && !fight.screamUsed) {
     fight.screamUsed = true;
-    fight.scream = { hp: enemyHp, reps: 0 };
-    events.push('scream');
+    if (!ward('scream')) {
+      fight.scream = { hp: enemyHp, reps: 0 };
+      events.push('scream');
+    }
   }
 
   if (belowHalf && enemy.isBoss && hasAbility(abilities, 'treasury') && !fight.treasuryUsed) {
     fight.treasuryUsed = true;
-    fight.guardLeft = abilityValue(abilities, 'treasury');
-    events.push('treasury');
+    if (!ward('treasury')) {
+      fight.guardLeft = abilityValue(abilities, 'treasury');
+      events.push('treasury');
+    }
   }
 
   // --- "Заражение": a minion that outlives its welcome leaks HP into the next one ---------
@@ -505,7 +546,8 @@ export function resolveArenaRep(
   if (enemyHp <= 0) {
     if (enemy.isBoss && hasAbility(abilities, 'falseDeath')) {
       const needed = abilityValue(abilities, 'falseDeath');
-      if (fight.lastStandReps < needed) {
+      // Warded, he simply dies.
+      if (fight.lastStandReps < needed && !ward('falseDeath')) {
         // Held at 1 HP; only an unbroken run of reps finishes the job.
         fight.lastStandReps += 1;
         enemyHp = 1;
@@ -524,6 +566,7 @@ export function resolveArenaRep(
           healed,
           xpFactor: xpMultiplier(abilities),
           events,
+          warded,
         };
       }
     }
@@ -598,5 +641,6 @@ export function resolveArenaRep(
     healed,
     xpFactor: xpMultiplier(abilities),
     events,
+    warded,
   };
 }

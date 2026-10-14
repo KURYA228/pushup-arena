@@ -74,6 +74,7 @@ export function EnemyIcon({
   frame: fixedFrame,
   light = false,
   original = false,
+  circle,
 }: {
   file: string;
   color: string;
@@ -120,6 +121,8 @@ export function EnemyIcon({
   light?: boolean;
   /** Shown as it was drawn, before scripts/brighten-boss-art.mjs lifted it for the fight screen. */
   original?: boolean;
+  /** Bare art cut to a circle at this `object-position`, whatever the picture's own shape. */
+  circle?: string;
 }) {
   const [failed, setFailed] = useState(false);
   /** The picture's own proportions, once the browser has them. */
@@ -147,8 +150,9 @@ export function EnemyIcon({
   const frame = shape && maxShape ? Math.min(shape, maxShape) : shape;
   const fitW = bare && frame ? Math.min(room, height * frame) : size;
   const fixed = bare && fixedFrame && shape && (shape >= 1.3 || shadowed) ? fixedFrame : null;
-  const fitH = fixed ? fixed.h : bare && frame ? Math.round(fitW / frame) : height;
-  const w = fixed ? fixed.w : Math.round(fitW);
+  const round = bare && !cutout && circle != null;
+  const fitH = round ? size : fixed ? fixed.h : bare && frame ? Math.round(fitW / frame) : height;
+  const w = round ? size : fixed ? fixed.w : Math.round(fitW);
 
   const img = (
     <img
@@ -181,7 +185,8 @@ export function EnemyIcon({
         // sides, and a figure is usually taller than it is wide. The same goes for any
         // artwork whose proportions aren't known yet — better a moment of letterboxing than
         // a moment with the head cut off.
-        objectFit: cutout || (bare && !shape) ? 'contain' : 'cover',
+        objectFit: round ? 'cover' : cutout || (bare && !shape) ? 'contain' : 'cover',
+        ...(round ? { objectPosition: circle, borderRadius: '50%' } : null),
         ...(light ? { filter: 'brightness(1.15)' } : null),
         ...(cutout
           ? { filter: 'drop-shadow(0 6px 14px rgba(0, 0, 0, 0.55))' }
@@ -210,7 +215,7 @@ export function EnemyIcon({
     // so nothing below it moves when the image finally loads.
     <span
       className={`relative flex shrink-0 items-center justify-center ${className ?? ''}`}
-      style={{ width: hug && shape ? w : Math.max(size, w), height: hug && shape ? fitH : height }}
+      style={{ width: round || (hug && shape) ? w : Math.max(size, w), height: round || (hug && shape) ? fitH : height }}
     >
       <span className="relative block" style={{ width: w, height: fitH }}>
         {img}

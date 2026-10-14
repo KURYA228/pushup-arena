@@ -1,23 +1,54 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useAnimationControls, useReducedMotion } from 'framer-motion';
-import { Crosshair, Dumbbell, Hammer, Snowflake, Wind, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import clsx from 'clsx';
 import type { ProfileRecord } from '../types';
 import { levelFromTotalXp } from '../data/leveling';
 import { getRank } from '../data/ranks';
-import { FREEZE_COST, UPGRADES, nextCost, upgradeLevel, type UpgradeId } from '../data/shop';
+import { CONSUMABLES, FREEZE_COST, STOCK_FIELD, UPGRADES, nextCost, upgradeLevel, type ConsumableId, type UpgradeId } from '../data/shop';
 import { MAX_FREEZES, freezesOf } from '../lib/streak';
 import { Burst } from './Burst';
 import { CountUp } from './CountUp';
 
-const ICONS: Record<UpgradeId, typeof Dumbbell> = {
-  power: Dumbbell,
-  precision: Crosshair,
-  heavy: Hammer,
-  breath: Wind,
-};
+type ItemId = UpgradeId | 'freeze' | ConsumableId;
 
-type ItemId = UpgradeId | 'freeze';
+const isConsumable = (id: ItemId): id is ConsumableId => id in CONSUMABLES;
+
+/** The items with a drawn badge under public/shop (cut by scripts/slice-ability-sheet.mjs --out shop). */
+const DRAWN = new Set<ItemId>(['power', 'precision', 'heavy', 'breath', 'freeze']);
+/**
+ * The ones drawn as a figure rather than a disc (cut off their white by scripts/cutout-white.mjs):
+ * shown whole, on a dark disc of the same size, so the row of icons still lines up.
+ */
+const FIGURES = new Set<ItemId>(['pierce', 'rage', 'ward', 'hunter', 'scout', 'hourglass', 'double']);
+
+/** An item's badge: the drawn disc, or the drawn figure on a dark disc of the same size. */
+function ItemIcon({ id }: { id: ItemId }) {
+  if (FIGURES.has(id)) {
+    return (
+      <span aria-hidden className="flex h-11 w-11 items-center justify-center rounded-full bg-arena-surface shadow-[0_0_10px_rgba(0,0,0,0.6)]">
+        <img
+          src={`${import.meta.env.BASE_URL}shop/${id}.png`}
+          alt=""
+          draggable={false}
+          className="h-10 w-10 select-none object-contain drop-shadow-[0_2px_3px_rgba(0,0,0,0.6)]"
+        />
+      </span>
+    );
+  }
+  if (DRAWN.has(id)) {
+    return (
+      <img
+        src={`${import.meta.env.BASE_URL}shop/${id}.png`}
+        alt=""
+        aria-hidden
+        draggable={false}
+        className="h-11 w-11 select-none rounded-full shadow-[0_0_10px_rgba(0,0,0,0.6)]"
+      />
+    );
+  }
+  return null;
+}
 
 /**
  * Where XP turns into upgrades. Every price is paid out of the XP that makes up your level, so
@@ -27,12 +58,14 @@ export function ShopModal({
   profile,
   buyUpgrade,
   buyFreeze,
+  buyConsumable,
   onPurchased,
   onClose,
 }: {
   profile: ProfileRecord;
   buyUpgrade: (id: UpgradeId) => Promise<boolean>;
   buyFreeze: () => Promise<boolean>;
+  buyConsumable: (id: ConsumableId) => Promise<boolean>;
   /** Plays the payment chime. */
   onPurchased: () => void;
   onClose: () => void;
@@ -52,14 +85,19 @@ export function ShopModal({
   const balance = useAnimationControls();
   const calm = useReducedMotion();
 
+  // Focus goes to the close button once, on opening. Tied to `onClose` it ran again on every
+  // purchase — the parent passes a fresh arrow each render — and focusing a button at the top
+  // scrolled the sheet back up under your finger.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
-    closeRef.current?.focus();
+    closeRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
   const xp = profile.totalXp;
   const level = levelFromTotalXp(xp).level;
@@ -71,7 +109,12 @@ export function ShopModal({
       return;
     }
     setConfirming(null);
-    const ok = id === 'freeze' ? await buyFreeze() : await buyUpgrade(id);
+    const ok =
+      id === 'freeze'
+        ? await buyFreeze()
+        : isConsumable(id)
+          ? await buyConsumable(id)
+          : await buyUpgrade(id);
     if (ok) {
       onPurchased();
       setBought({ id, at: Date.now() });
@@ -93,7 +136,10 @@ export function ShopModal({
     id: ItemId;
     name: string;
     detail: string;
-    icon: typeof Dumbbell;
+    /** Bought by the piece and used up, rather than levelled. */
+    consumable?: boolean;
+    /** A heading over this item, starting a section of the shop. */
+    section?: string;
     have: number;
     max: number;
     cost: number | null;
@@ -102,7 +148,6 @@ export function ShopModal({
       id: u.id,
       name: u.name,
       detail: u.perLevel,
-      icon: ICONS[u.id],
       have: upgradeLevel(profile.upgrades, u.id),
       max: u.costs.length,
       cost: nextCost(profile.upgrades, u),
@@ -111,11 +156,25 @@ export function ShopModal({
       id: 'freeze' as const,
       name: 'Заморозка стрика',
       detail: 'Закрывает один пропущенный день',
-      icon: Snowflake,
+      consumable: true,
       have: freezesOf(profile),
       max: MAX_FREEZES,
       cost: freezesOf(profile) >= MAX_FREEZES ? null : FREEZE_COST,
     },
+    ...(Object.keys(CONSUMABLES) as ConsumableId[]).map((id, i) => {
+      const def = CONSUMABLES[id];
+      const have = profile[STOCK_FIELD[id]] ?? 0;
+      return {
+        id,
+        name: def.name,
+        detail: def.detail,
+        consumable: true,
+        have,
+        max: def.max,
+        cost: have >= def.max ? null : def.cost,
+        section: i === 0 ? 'В бой с собой' : undefined,
+      };
+    }),
   ];
 
   return (
@@ -169,7 +228,6 @@ export function ShopModal({
 
         <ul className="mt-4 space-y-2">
           {items.map((it, index) => {
-            const Icon = it.icon;
             const maxed = it.cost == null;
             const affordable = !maxed && xp >= it.cost!;
             const after = maxed ? level : levelFromTotalXp(Math.max(0, xp - it.cost!)).level;
@@ -177,8 +235,11 @@ export function ShopModal({
             const isConfirming = confirming === it.id;
             const justBought = bought?.id === it.id;
             return (
+              <Fragment key={it.id}>
+              {it.section && (
+                <li className="px-1 pt-3 text-[11px] font-bold uppercase tracking-widest text-arena-text-dim">{it.section}</li>
+              )}
               <motion.li
-                key={it.id}
                 // Dealt onto the table one after another.
                 initial={calm ? false : { opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -203,9 +264,9 @@ export function ShopModal({
                     initial={justBought && !calm ? { rotate: -25, scale: 1.4 } : false}
                     animate={{ rotate: 0, scale: 1 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 10 }}
-                    className="relative mt-0.5 rounded-xl bg-arena-surface p-2 text-arena-amber"
+                    className="relative mt-0.5 shrink-0"
                   >
-                    <Icon size={18} />
+                    <ItemIcon id={it.id} />
                     <AnimatePresence>
                       {justBought && (
                         <motion.span
@@ -215,7 +276,7 @@ export function ShopModal({
                           transition={{ duration: 1.1, ease: 'easeOut' }}
                           className="pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap text-[11px] font-extrabold text-arena-amber"
                         >
-                          +1 ур.
+                          {it.consumable ? '+1' : '+1 ур.'}
                         </motion.span>
                       )}
                     </AnimatePresence>
@@ -261,7 +322,9 @@ export function ShopModal({
                 >
                   {justBought && <Burst key={bought.at} count={16} spread={90} />}
                   {maxed
-                    ? 'Максимум'
+                    ? it.consumable
+                      ? 'Запас полон'
+                      : 'Максимум'
                     : isConfirming
                       ? `Точно? Уровень ${level} → ${after}`
                       : `Купить за ${it.cost} XP`}
@@ -273,6 +336,7 @@ export function ShopModal({
                   <p className="mt-1 text-center text-[10px] text-arena-red">уровень упадёт до {after}</p>
                 )}
               </motion.li>
+              </Fragment>
             );
           })}
         </ul>

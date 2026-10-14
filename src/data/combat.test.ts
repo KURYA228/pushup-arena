@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BOSSES, BOSS_STEP, encounterAt } from './bosses.ts';
-import { CRYSTAL_REPS, END_CRYSTALS, FREEZE_PAUSE_MS, JOKER_CRIT_CHANCE, NO_STOP_MS, SET_BREAK_MS } from './abilities.ts';
+import { CRYSTAL_REPS, END_CRYSTALS, FREEZE_PAUSE_MS, JOKER_CRIT_CHANCE, NO_STOP_MS, SET_BREAK_MS, MAX_TIER, hardenAbilities } from './abilities.ts';
 import { applyIdleRegen, freshFight, resolveArenaRep, type ArenaState } from './combat.ts';
+import { NO_PERKS, RAGE_MULT, type PlayerPerks } from './shop.ts';
 
 const indexOf = (id: string) => BOSSES.findIndex((b) => b.id === id);
 
@@ -492,4 +493,125 @@ test('Стальная воля: выпавший крит не проходит
   assert.ok(o.events.includes('crit-blocked'));
   const plain = resolveArenaRep(s, 1_000_000, 1);
   assert.ok(!plain.events.includes('crit-blocked'));
+});
+
+/** Like `reps`, with perks from the shop on every rep. */
+function repsWith(state: ArenaState, count: number, perks: PlayerPerks, gapMs = 1000, startAt = 1_000_000) {
+  let s = state;
+  let t = startAt;
+  const outcomes = [];
+  for (let i = 0; i < count; i += 1) {
+    const o = resolveArenaRep(s, t, 1, perks);
+    outcomes.push(o);
+    s = o.next;
+    t += gapMs;
+  }
+  return { state: s, outcomes, endedAt: t };
+}
+
+test('Бронебой срезает «Толстокожесть»: без брони удар по Крабсу полный', () => {
+  const krabs = BOSSES[indexOf('grunt')];
+  // Четвёртый повтор подхода — первые три уходят в кассу.
+  const plain = reps(at('grunt', BOSS_STEP), 4).outcomes[3].damage;
+  const pierced = repsWith(at('grunt', BOSS_STEP), 4, { ...NO_PERKS, armorPierce: 0.1 }).outcomes[3].damage;
+  assert.equal(pierced, Math.round(krabs.baseDamage));
+  assert.ok(pierced > plain, `${pierced} должно быть больше ${plain}`);
+  // Сверх брони ничего не добавляет.
+  const over = repsWith(at('grunt', BOSS_STEP), 4, { ...NO_PERKS, armorPierce: 0.5 }).outcomes[3].damage;
+  assert.equal(over, pierced);
+});
+
+test('Зелье ярости: удар вдвое сильнее', () => {
+  const plain = reps(at('grunt', 0), 1).outcomes[0].damage;
+  const raging = repsWith(at('grunt', 0), 1, { ...NO_PERKS, rage: true }).outcomes[0].damage;
+  assert.equal(raging, plain * RAGE_MULT);
+});
+
+test('Оберег: гасит заморозку Грю и тратится', () => {
+  const warm = reps(at('berserker', BOSS_STEP), 2);
+  const after = repsWith(warm.state, 2, { ...NO_PERKS, ward: true }, 1000, warm.endedAt + FREEZE_PAUSE_MS);
+  assert.equal(after.outcomes[0].warded, 'freezeRay');
+  assert.equal(after.outcomes[0].blocked, null);
+  assert.ok(!after.outcomes[0].events.includes('frozen'));
+});
+
+test('Оберег: Шкипер не отступает, и второго отступления уже не будет', () => {
+  const run = (() => {
+    let s = at('steelguard', BOSS_STEP);
+    let t = 1_000_000;
+    for (let i = 0; i < 500; i += 1) {
+      const o = resolveArenaRep(s, t, 1, { ...NO_PERKS, ward: true });
+      s = o.next;
+      t += 1000;
+      if (o.warded) return { o, s };
+    }
+    throw new Error('оберег не сработал');
+  })();
+  assert.equal(run.o.warded, 'retreat');
+  assert.equal(run.o.healed, 0);
+  assert.equal(run.s.fight.retreatUsed, true);
+});
+
+test('Оберег: на подчинённых не тратится', () => {
+  const run = repsWith(at('berserker', 0), 5, { ...NO_PERKS, ward: true }, 1000);
+  assert.ok(run.outcomes.every((o) => o.warded == null));
+});
+
+test('Оберег: Свин не крадёт яйцо — повтор бьёт', () => {
+  const run = repsWith(at('brawler', BOSS_STEP), 3, { ...NO_PERKS, ward: true });
+  assert.equal(run.outcomes[2].warded, 'piggyBank');
+  assert.equal(run.outcomes[2].blocked, null);
+  assert.ok(run.outcomes[2].damage > 0);
+});
+
+test('Круг 2: HP и удар по подчинённым те же — меняются только способности боссов', () => {
+  const plain = reps(at('grunt', 0), 1).outcomes[0];
+  const round2 = repsWith(at('grunt', 0), 1, { ...NO_PERKS, tier: 1 }).outcomes[0];
+  assert.equal(round2.damage, plain.damage);
+  assert.equal(round2.next.enemyHp, plain.next.enemyHp);
+});
+
+test('Круг 2: способности злее — броня толще, плата больше, заморозка дольше', () => {
+  const krabs = hardenAbilities(BOSSES[indexOf('grunt')].abilities, 1);
+  assert.equal(krabs.find((a) => a.kind === 'armor')?.value, 0.15);
+  assert.equal(krabs.find((a) => a.kind === 'entryFee')?.value, 4);
+  // В бою плата за вход теперь — четыре повтора.
+  const run = repsWith(at('grunt', BOSS_STEP), 5, { ...NO_PERKS, tier: 1 });
+  assert.deepEqual(run.outcomes.map((o) => o.blocked), ['fee', 'fee', 'fee', 'fee', null]);
+  const gru = hardenAbilities(BOSSES[indexOf('berserker')].abilities, 1);
+  assert.equal(gru.find((a) => a.kind === 'freezeRay')?.value, 4);
+});
+
+test('Круги: дальше последнего круга сильнее не становится, дань не чаще раза в 4 повтора', () => {
+  const tsar = hardenAbilities(BOSSES[indexOf('bloodking')].abilities, 10);
+  assert.equal(tsar.find((a) => a.kind === 'tribute')?.value, 4);
+  assert.deepEqual(hardenAbilities(BOSSES[indexOf('grunt')].abilities, 10), hardenAbilities(BOSSES[indexOf('grunt')].abilities, MAX_TIER));
+  const krabs = hardenAbilities(BOSSES[indexOf('grunt')].abilities, MAX_TIER);
+  assert.equal(krabs.find((a) => a.kind === 'armor')?.value, 0.3);
+  // Первый круг — ничего не меняется.
+  assert.deepEqual(hardenAbilities(BOSSES[indexOf('grunt')].abilities, 0), BOSSES[indexOf('grunt')].abilities);
+});
+
+test('Последний круг: каждого босса всё ещё можно победить', () => {
+  for (let i = 0; i < BOSSES.length; i += 1) {
+    let s = at(BOSSES[i].id, BOSS_STEP);
+    let t = 1_000_000;
+    let won = false;
+    for (let n = 0; n < 20000 && !won; n += 1) {
+      const o = resolveArenaRep(s, t, 1, { ...NO_PERKS, tier: MAX_TIER });
+      s = o.next;
+      t += 1000;
+      won = o.bossDefeated || o.bossRebeaten;
+    }
+    assert.ok(won, `${BOSSES[i].name} на круге ${MAX_TIER + 1} непобедим`);
+  }
+});
+
+test('Двойной удар: по подчинённому вдвое, по боссу как обычно', () => {
+  const plain = reps(at('grunt', 0), 1).outcomes[0].damage;
+  const doubled = repsWith(at('grunt', 0), 1, { ...NO_PERKS, double: true }).outcomes[0].damage;
+  assert.equal(doubled, plain * 2);
+  const boss = reps(at('grunt', BOSS_STEP), 4).outcomes[3].damage;
+  const bossDoubled = repsWith(at('grunt', BOSS_STEP), 4, { ...NO_PERKS, double: true }).outcomes[3].damage;
+  assert.equal(bossDoubled, boss);
 });

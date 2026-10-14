@@ -16,6 +16,7 @@ export function BossIcon({
   shadowed,
   frame,
   original = true,
+  circle,
 }: {
   boss: BossDef;
   index: number;
@@ -33,6 +34,8 @@ export function BossIcon({
    * the phone is on the floor at arm's length — everywhere else he looks the way he was drawn.
    */
   original?: boolean;
+  /** See EnemyIcon. */
+  circle?: string;
 }) {
   return (
     <EnemyIcon
@@ -50,6 +53,7 @@ export function BossIcon({
       frame={frame}
       light={boss.artLight}
       original={original}
+      circle={circle}
     />
   );
 }

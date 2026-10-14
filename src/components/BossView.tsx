@@ -5,8 +5,10 @@ import type { useProfile } from '../hooks/useProfile';
 import type { Feedback } from '../hooks/useFeedback';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { BOSSES, stageProgressLabel, type BossDef } from '../data/bosses';
-import { CRYSTAL_REPS, FREEZE_PAUSE_MS, HALF_HP, SET_BREAK_MS, SOUP_BOILS_AFTER, abilityName, abilityValue, describeAbility, hasAbility } from '../data/abilities';
-import { perksFrom } from '../data/shop';
+import { AbilityIcon } from './AbilityIcon';
+import { ABILITY_INFO, TIER_XP, nextTier, CRYSTAL_REPS, FREEZE_PAUSE_MS, HALF_HP, SET_BREAK_MS, SOUP_BOILS_AFTER, abilityName, abilityValue, describeAbility, hasAbility } from '../data/abilities';
+import { DOUBLE_REPS, RAGE_MULT, RAGE_REPS, perksFrom, upgradeLevel } from '../data/shop';
+import { scoutHints } from '../lib/scout';
 import { FreezeRayWarning, IceBlock, SHOT_FLY_S } from './GruFx';
 import { MomWatch } from './NicoleFx';
 import { CameraFeed, EnrageEyes, LightsFlicker } from './FreddyFx';
@@ -18,7 +20,8 @@ import { ElixirBar, HealSpell, KingAmbient, KingEmote, KingPanic, MegaKnightRun 
 import { GliderFlyby, GoblinAmbient, SpideyTeam } from './GoblinFx';
 import { DragonScroll, DumplingSnack, FireworkChair, FuriousRaid, TaiLungAmbient } from './TaiLungFx';
 import { AvengersAssist, DronePushups, PuppetStrings, RebootGlitch, UltronAmbient } from './UltronFx';
-import { ARROWS_LAND_AT, FLEX_BEATS, KiryukhaAmbient, LION_MEOW_AT, LION_ROAR_AT, RageAura, RomanEvents, SPARTAN_BEATS, StillStanding } from './KiryukhaFx';
+import { ARROWS_LAND_AT, FLEX_BEATS, KiryukhaAmbient, LION_MEOW_AT, Laurel, LION_ROAR_AT, RageAura, RomanEvents, SPARTAN_BEATS, StillStanding } from './KiryukhaFx';
+import { Avatar } from './PlayerBadge';
 import { DragonWeak, EndCrystals, EndHitParticles, EnderAmbient, InfectionBadge } from './EnderFx';
 import { HpMarks, IceShield, RetreatPlaster, hpMarks } from './SkipperFx';
 import { BossIcon } from './BossIcon';
@@ -35,7 +38,7 @@ import { Heartbeat, PulseTrace } from './Heartbeat';
 import { BOSS_HEARTS, MINION_HEARTS } from '../lib/vitals';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { CameraPanel } from './CameraPanel';
-import { Camera, LogOut, RotateCcw, Search, Zap } from 'lucide-react';
+import { Camera, LogOut, RotateCcw, Search } from 'lucide-react';
 import clsx from 'clsx';
 import { HintCard } from './HintCard';
 import { useHint } from '../lib/hints';
@@ -80,6 +83,12 @@ const NAME_PX = 62;
  * figure in the middle; trimming their sides makes the figure itself bigger on a phone.
  */
 const ART_MAX_SHAPE = 1.15;
+/** The longest a boss's line may hold the fight up, however it went (ms). */
+const TALK_MAX_MS = 20000;
+/** The breather after each minion falls: counted down from this, a second a number. */
+const REST_FROM = 3;
+/** Before a boss it's longer — time to get set, and to read that he's fought after his report. */
+const REST_BEFORE_BOSS = 5;
 
 export function BossView({
   profile,
@@ -90,6 +99,11 @@ export function BossView({
   feedback,
   notify,
   endReplay,
+  drinkRage,
+  activateDouble,
+  spendHourglass,
+  me,
+  onReplayAll,
 }: {
   profile: ProfileRecord;
   derived: Derived;
@@ -100,6 +114,16 @@ export function BossView({
   notify: (kind: ToastKind, title: string, description?: string) => void;
   /** Leaves a rematch; the real progress comes back. */
   endReplay: () => Promise<void>;
+  /** Drinks a «Зелье ярости» from stock. */
+  drinkRage: () => Promise<boolean>;
+  /** Switches a «Двойной удар» on. */
+  activateDouble: () => Promise<boolean>;
+  /** Spends one «Песочные часы» on a rest. */
+  spendHourglass: () => Promise<boolean>;
+  /** The player as the board shows them — the face Kiryukha's wreath comes down on. */
+  me: { name: string | null; avatar: string | null; level: number };
+  /** Walks the whole arena again from the first boss (a replay; nothing already won is lost). */
+  onReplayAll: () => void;
 }) {
   const [pops, setPops] = useState<DamagePop[]>([]);
   const [shake, setShake] = useState<'hit' | 'crit' | null>(null);
@@ -117,7 +141,42 @@ export function BossView({
    */
   const [interlude, setInterlude] = useState<number | null>(null);
   const enemyBoxRef = useRef<HTMLDivElement>(null);
+  /**
+   * The breather between a fallen enemy and whoever comes next: the screen goes dark and counts
+   * down 3, 2, 1 in big numbers (5 before a boss). `rest` is the number on screen (0 for "В БОЙ!"); `restLock`
+   * holds reps off from the kill to the end of the count, the send-off before it included.
+   */
+  const [rest, setRest] = useState<{ id: number; n: number } | null>(null);
+  const [restLock, setRestLock] = useState(false);
+  const startRest = (afterMs: number, then?: () => void, from = REST_FROM) => {
+    // «Песочные часы» shorten the plain breather to a second — not the longer one before a boss,
+    // which is there to be read.
+    if (from === REST_FROM && (profile.hourglasses ?? 0) > 0) {
+      from = 1;
+      void spendHourglass();
+    }
+    setRestLock(true);
+    const id = ++popId;
+    const step = (n: number) => {
+      setRest({ id, n });
+      if (n > 0) {
+        feedback.rep();
+        window.setTimeout(() => step(n - 1), 1000);
+      } else {
+        feedback.levelUp();
+        window.setTimeout(() => {
+          setRest((cur) => (cur?.id === id ? null : cur));
+          setRestLock(false);
+          then?.();
+        }, 600);
+      }
+    };
+    window.setTimeout(() => step(from), afterMs);
+  };
+  /** When the longest send-off holding the stage right now ends — the breather waits for it. */
+  const holdEndRef = useRef(0);
   const holdStage = (ms: number) => {
+    holdEndRef.current = Math.max(holdEndRef.current, Date.now() + ms);
     setInterlude(enemyBoxRef.current?.offsetHeight ?? 0);
     window.setTimeout(() => setInterlude(null), ms);
   };
@@ -134,6 +193,7 @@ export function BossView({
       y: r ? r.top + r.height / 2 : window.innerHeight / 3,
       art: `${import.meta.env.BASE_URL}bosses/${derived.boss.icon}`,
       variant,
+      player: kind === 'laurel' ? { name: me.name ?? 'Ты', avatar: me.avatar, level: me.level } : undefined,
     });
     window.setTimeout(() => setScene((cur) => (cur?.id === id ? null : cur)), SCENE_MS[kind]);
   };
@@ -314,6 +374,13 @@ export function BossView({
    * that's his; before the report they'd be shapes nobody has explained yet.
    */
   const abilitiesOn = enemy.isBoss && !bossIntro && !talking && scouted;
+  /**
+   * The fight with a boss starts when the report is closed, not before: over the "BOSS" cut, under
+   * his line and while the report is up, a rep doesn't land — he hasn't finished walking out yet.
+   * (Under reduced motion nothing tracks his talking, so it can't hold the fight up.)
+   */
+  const fightLocked =
+    restLock || (enemy.isBoss && !derived.allBossesDefeated && (bossIntro || (talking && !calm) || briefing || !scouted || finale));
 
   // Bebop and Rocksteady walk on firing: a volley the moment either becomes the one you face —
   // once whatever send-off is holding the stage has finished, not over it. Not on opening the
@@ -406,7 +473,7 @@ export function BossView({
   };
 
   const handleRep = async () => {
-    if (busyRef.current || derived.allBossesDefeated) return;
+    if (busyRef.current || derived.allBossesDefeated || fightLocked) return;
     busyRef.current = true;
     // Where the enemy being hit is drawn, taken before the rep lands: a killing blow swaps him
     // out, and the strike has to play over the one it struck, to the end.
@@ -432,16 +499,18 @@ export function BossView({
       const creeper = !enemy.isBoss && boss.id === 'nameless' && derived.stageStep === 2;
       // So is Stockman before Shredder: his mousers pour out along the bar first.
       const mousers = !enemy.isBoss && boss.id === 'stormborn' && derived.stageStep === 2;
+      // Every minion that falls is followed by the breather; the boss walks out after it.
+      if (result.minionDefeated && !result.bossReached) startRest(700);
       if (result.bossReached) {
         if (creeper) {
           holdStage(1500);
-          window.setTimeout(() => playEntrance(boss.line), 1500);
+          startRest(1500, () => playEntrance(boss.line), REST_BEFORE_BOSS);
         } else if (mousers) {
           playScene('mousers', hpBarRef.current?.getBoundingClientRect());
           feedback.mousers();
           holdStage(1900);
-          window.setTimeout(() => playEntrance(boss.line), 1900);
-        } else playEntrance(boss.line);
+          startRest(1900, () => playEntrance(boss.line), REST_BEFORE_BOSS);
+        } else startRest(700, () => playEntrance(boss.line), REST_BEFORE_BOSS);
         // First time against him: the scouting report once he's done talking.
         // Every time he walks out — the first time, again after a loss of the thread, on a replay.
         briefAfterEntrance.current = true;
@@ -465,6 +534,13 @@ export function BossView({
         joke: '🃏 ХА-ХА, ШУТКА!',
         tribute: '👑 ДАНЬ В КАЗНУ!',
       } as const;
+      // «Оберег» took the ability on itself: say which, so the charm's worth is seen.
+      if (result.warded) {
+        addPop('🧿 ОБЕРЕГ!', false);
+        notify('info', 'Оберег сработал', `«${ABILITY_INFO[result.warded].name}» не сработала`);
+      }
+      // The potion's last rep.
+      if ((profile.rageLeft ?? 0) === 1) notify('info', 'Ярость прошла', 'Зелье ярости больше не действует');
       if (result.events.includes('frozen')) {
         setFrostPending(true);
         window.setTimeout(() => {
@@ -774,6 +850,18 @@ export function BossView({
         holdStage(SCENE_MS['coin-spill'] - 300);
       }
 
+      // A boss down and a stage of minions next: the breather comes after his send-off. (Not when
+      // the run ends here, and not before Kiryukha — he has no minions, and the finale or his own
+      // entrance is the way in.)
+      const nextStage = BOSSES[derived.bossIndex + 1];
+      if (
+        (result.bossDefeated || result.bossRebeaten) &&
+        !result.replayWon &&
+        nextStage &&
+        nextStage.minions.length > 0
+      ) {
+        startRest(Math.max(900, holdEndRef.current - Date.now()));
+      }
       if (result.replayWon) {
         setFlash('win');
         window.setTimeout(() => setFlash(null), 900);
@@ -994,7 +1082,12 @@ export function BossView({
   /** The boss walks out: the "BOSS" cut, the call, and his line if he has one. */
   const playEntrance = (line: BossDef['line']) => {
     feedback.bossEncounter(line);
-    if (line) setTalking(true);
+    if (line) {
+      setTalking(true);
+      // A backstop: the end of his line is noticed frame by frame, and frames stop on a locked
+      // phone — the fight is held up while he talks, so it mustn't wait on that forever.
+      window.setTimeout(() => setTalking(false), TALK_MAX_MS);
+    }
     // The cut to the boss. Cleared on a timer rather than by the animation, so a tab
     // backgrounded mid-flourish can't leave the veil hanging over the fight.
     setBossIntro(true);
@@ -1047,6 +1140,8 @@ export function BossView({
     />
   );
 
+  /** The round «Пройти снова» starts once the arena is beaten: one past the hardest finished. */
+  const upNext = nextTier(profile.cycle);
   if (derived.allBossesDefeated) {
     // Until his send-off is over, nothing but the scene itself on a dark stage.
     if (crowning) {
@@ -1063,14 +1158,61 @@ export function BossView({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <h1 className="mt-3 text-xl font-bold text-arena-text">Все боссы арены повержены</h1>
+        {/* The master of the arena, still wearing the wreath Kiryukha's fall left them. */}
+        <div className="relative mb-2 mt-4 flex h-28 w-28 items-center justify-center">
+          <motion.span
+            aria-hidden
+            className="absolute inset-0 rounded-full"
+            style={{ background: 'radial-gradient(circle, rgba(250,204,21,0.4), transparent 70%)' }}
+            animate={calm ? {} : { opacity: [0.5, 1, 0.5], scale: [1, 1.1, 1] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <div className="relative flex scale-[1.3]">
+            <Avatar name={me.name ?? 'Ты'} avatar={me.avatar} level={me.level} size="lg" />
+          </div>
+          {/* Round the face, as it landed in the scene: its branches open upward. */}
+          <motion.div
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[42%]"
+            animate={calm ? {} : { y: [0, -3, 0], rotate: [-2, 2, -2] }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <Laurel size={118} />
+          </motion.div>
+        </div>
+        <p className="text-sm font-bold text-arena-amber">{me.name ?? 'Ты'} — хозяин арены</p>
+        {(profile.cycle ?? 0) > 0 && (
+          <p className="mt-1 rounded-full bg-arena-amber/15 px-2.5 py-0.5 text-[11px] font-black text-arena-amber">
+            Пройдено кругов: {(profile.cycle ?? 0) + 1}
+          </p>
+        )}
+        <h1 className="mt-3 text-xl font-bold text-arena-text">У тебя все боссы повержены!</h1>
         <p className="mt-2 text-sm text-arena-text-dim">
-          Ты прошёл всех {BOSSES.length} противников. Заходи в Speed Rush, чтобы продолжать качаться и бить рекорды.
+          Ты прошёл всех {BOSSES.length} противников арены — от Мистера Крабса до самого Кирюхи.
         </p>
+
+        {/* The way back in: the whole arena again, from the first boss. */}
+        <div className="mt-5 w-full rounded-2xl border border-arena-amber/40 bg-arena-surface p-4">
+          <p className="text-sm font-bold text-arena-text">Пройти снова · Круг {upNext + 1}</p>
+          <p className="mt-1 text-xs leading-snug text-arena-text-dim">
+            Все этапы заново. HP у врагов прежнее, но способности боссов стали опаснее и тяжелее: броня толще, лечение
+            сильнее, ловушки срабатывают чаще и держат дольше. Зато опыта на {Math.round(TIER_XP * upNext * 100)}% больше. Победы и звания останутся.
+          </p>
+          <motion.div
+            className="mt-3"
+            animate={calm ? {} : { scale: [1, 1.03, 1] }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <button type="button" onClick={onReplayAll} className="btn-3d flex w-full items-center justify-center gap-2">
+              <RotateCcw size={18} /> Пройти снова · Круг {upNext + 1}
+            </button>
+          </motion.div>
+        </div>
+
+        <p className="mt-4 text-xs text-arena-text-dim">Или заходи в Speed Rush — качаться и бить рекорды.</p>
         <button
           type="button"
           onClick={() => setFinale(true)}
-          className="mt-5 rounded-xl border border-arena-border px-4 py-2 text-sm text-arena-text-dim"
+          className="mt-3 rounded-xl border border-arena-border px-4 py-2 text-sm text-arena-text-dim"
         >
           Посмотреть финал ещё раз
         </button>
@@ -1081,6 +1223,44 @@ export function BossView({
 
   return (
     <div className="arena-page pb-8 pt-6">
+      {/* The breather after a minion: dark, «Отдых», and the count in big numbers. */}
+      <AnimatePresence>
+        {rest && (
+          <motion.div
+            key="rest"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-center bg-black/80"
+          >
+            <p className="mb-2 text-sm font-bold uppercase tracking-[0.3em] text-arena-text-dim">
+              {rest.n > 0 ? 'Отдых' : ''}
+            </p>
+            {/* Each number replaces the last outright and punches in, as in Rush's count-in. */}
+            <motion.span
+              key={rest.n}
+              initial={calm ? { opacity: 0 } : { scale: 2.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 18 }}
+              className={`font-black leading-none ${rest.n > 0 ? 'text-[9rem] text-arena-text' : 'text-7xl text-arena-amber'}`}
+              style={{ textShadow: '0 0 40px rgba(245, 158, 11, 0.6)' }}
+            >
+              {rest.n > 0 ? rest.n : 'В БОЙ!'}
+            </motion.span>
+            {rest.n > 0 && (
+              <p className="mt-4 text-xs text-arena-text-dim">
+                {derived.enemy.isBoss ? `Дальше — босс ${boss.name}` : `Дальше — ${derived.enemy.name}`}
+              </p>
+            )}
+            {/* Before a boss: say so now, so nobody spends the first reps on his entrance. */}
+            {derived.enemy.isBoss && (
+              <p className="mx-6 mt-3 max-w-xs rounded-xl border border-arena-amber/40 bg-arena-amber/10 px-3 py-2 text-center text-xs font-semibold leading-snug text-arena-amber">
+                Атаковать босса можно после его описания — разведки. Дослушай его и нажми «Понятно, в бой!»
+              </p>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* A rematch says so, with the way out: the real progress waits until he falls or you leave.
           Loud on purpose, and stuck to the top of the screen — it's easy to forget you're in one
           and keep grinding old stages while the real one sits waiting. */}
@@ -1098,10 +1278,21 @@ export function BossView({
         >
           <RotateCcw size={22} className="shrink-0 text-arena-amber" />
           <span className="min-w-0 flex-1 leading-tight">
-            <b className="block text-sm text-arena-amber">Перепрохождение</b>
-            <span className="text-[11px] text-arena-text">
-              Твой этап {(profile.replay?.returnTo.currentBossIndex ?? 0) + 1} ждёт — выйди, чтобы вернуться к нему
-            </span>
+            {derived.tier > 0 ? (
+              <>
+                <b className="block text-sm text-arena-amber">Круг {derived.tier + 1} · боссы усилены</b>
+                <span className="text-[11px] text-arena-text">
+                  HP прежнее, способности опаснее и тяжелее, опыта +{Math.round(TIER_XP * derived.tier * 100)}%. Выйти можно в любой момент
+                </span>
+              </>
+            ) : (
+              <>
+                <b className="block text-sm text-arena-amber">Перепрохождение</b>
+                <span className="text-[11px] text-arena-text">
+                  Твой этап {(profile.replay?.returnTo.currentBossIndex ?? 0) + 1} ждёт — выйди, чтобы вернуться к нему
+                </span>
+              </>
+            )}
           </span>
           <button
             onClick={() => void endReplay()}
@@ -1201,6 +1392,7 @@ export function BossView({
                   // he's done talking and the scouting report is closed, as the fight starts.
                   ready={abilitiesOn}
                   royal={isKing}
+                  round={boss.artCircle != null}
                   hpFrac={profile.enemyHp / Math.max(1, profile.fight.enemyMaxHp || enemy.hp)}
                   hitId={hit?.id ?? null}
                 />
@@ -1302,6 +1494,7 @@ export function BossView({
                     hug
                     bare
                     original={false}
+                    circle={boss.artCircle}
                   />
                 </BossTalk>
               ) : (
@@ -1354,11 +1547,22 @@ export function BossView({
                           : 'border-arena-amber/40 text-arena-amber',
                       )}
                     >
-                      <Zap size={10} />
+                      <AbilityIcon kind={a.kind} className="!h-4 !w-4 text-[11px] leading-none" />
                       {abilityName(a)}
                     </button>
                   ))}
               </div>
+              {/* «Свиток разведки»: how far off his counted abilities are. */}
+              {abilitiesOn && upgradeLevel(profile.upgrades, 'scout') > 0 && (
+                <div className="relative mt-1 flex flex-wrap items-center justify-center gap-1 px-2">
+                  <img src={`${import.meta.env.BASE_URL}shop/scout.png`} alt="" aria-hidden className="h-4 w-4 object-contain" />
+                  {scoutHints(boss.abilities, profile.fight).map((h) => (
+                    <span key={h.icon} className="rounded-full bg-arena-surface-2 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-arena-text">
+                      {h.icon} {h.text}
+                    </span>
+                  ))}
+                </div>
+              )}
               <AnimatePresence>
                 {enemy.isBoss && openAbility && (
                   <motion.div
@@ -1409,6 +1613,92 @@ export function BossView({
         <p className="mt-1 text-xs tabular-nums text-arena-text-dim">
           {interlude != null ? '\u00a0' : `${profile.enemyHp} / ${enemy.hp} HP`}
         </p>
+
+        {/* Why reps aren't landing yet: he's still walking out, talking, or the report is up. */}
+        {fightLocked && !restLock && interlude == null && (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={calm ? { opacity: 1 } : { opacity: [0.55, 1, 0.55] }}
+            transition={calm ? {} : { duration: 1.4, repeat: Infinity }}
+            className="mt-1 text-center text-[11px] font-semibold text-arena-amber"
+          >
+            {briefing || !scouted ? 'Бой начнётся, когда закроешь разведку' : 'Дослушай босса — бой ещё не начался'}
+          </motion.p>
+        )}
+
+        {/* What's in the bag: the potion to drink (or the one working), the charms standing by. */}
+        {((profile.rage ?? 0) > 0 ||
+          (profile.rageLeft ?? 0) > 0 ||
+          (profile.wards ?? 0) > 0 ||
+          (profile.doubles ?? 0) > 0 ||
+          (profile.doubleLeft ?? 0) > 0 ||
+          (profile.hourglasses ?? 0) > 0) && (
+          <div className="relative z-10 mt-1.5 flex flex-wrap items-center justify-center gap-2">
+            {(profile.rageLeft ?? 0) > 0 ? (
+              <motion.span
+                animate={calm ? {} : { boxShadow: ['0 0 0px rgba(239,68,68,0)', '0 0 14px rgba(239,68,68,0.8)', '0 0 0px rgba(239,68,68,0)'] }}
+                transition={{ duration: 1, repeat: Infinity }}
+                className="flex items-center gap-1 rounded-full bg-arena-red/20 px-2.5 py-1 text-[11px] font-black tabular-nums text-arena-red"
+              >
+                <img src={`${import.meta.env.BASE_URL}shop/rage.png`} alt="" aria-hidden className="h-4 w-4 object-contain" /> Ярость x{RAGE_MULT} · ещё {profile.rageLeft}
+              </motion.span>
+            ) : (
+              (profile.rage ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void drinkRage().then((ok) => {
+                      if (!ok) return;
+                      feedback.levelUp();
+                      notify('info', 'Зелье выпито!', `Следующие ${RAGE_REPS} повторов бьют в ${RAGE_MULT} раза сильнее`);
+                    });
+                  }}
+                  className="flex items-center gap-1 rounded-full border border-arena-red/60 bg-arena-red/10 px-2.5 py-1 text-[11px] font-bold text-arena-red active:scale-95"
+                >
+                  <img src={`${import.meta.env.BASE_URL}shop/rage.png`} alt="" aria-hidden className="h-4 w-4 object-contain" /> Выпить зелье ярости · {profile.rage}
+                </button>
+              )
+            )}
+            {(profile.doubleLeft ?? 0) > 0 ? (
+              <span className="flex items-center gap-1 rounded-full bg-arena-amber/20 px-2.5 py-1 text-[11px] font-black tabular-nums text-arena-amber">
+                <img src={`${import.meta.env.BASE_URL}shop/double.png`} alt="" aria-hidden className="h-4 w-4 object-contain" /> Двойной удар · ещё {profile.doubleLeft}
+              </span>
+            ) : (
+              (profile.doubles ?? 0) > 0 &&
+              !enemy.isBoss && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void activateDouble().then((ok) => {
+                      if (!ok) return;
+                      feedback.levelUp();
+                      notify('info', 'Двойной удар!', `Следующие ${DOUBLE_REPS} повторов по подчинённым бьют дважды`);
+                    });
+                  }}
+                  className="flex items-center gap-1 rounded-full border border-arena-amber/60 bg-arena-amber/10 px-2.5 py-1 text-[11px] font-bold text-arena-amber active:scale-95"
+                >
+                  <img src={`${import.meta.env.BASE_URL}shop/double.png`} alt="" aria-hidden className="h-4 w-4 object-contain" /> Двойной удар · {profile.doubles}
+                </button>
+              )
+            )}
+            {(profile.hourglasses ?? 0) > 0 && (
+              <span
+                title="Песочные часы сами сократят отдых между подчинёнными до секунды"
+                className="flex items-center gap-1 rounded-full bg-arena-surface-2 px-2.5 py-1 text-[11px] font-bold tabular-nums text-arena-text"
+              >
+                <img src={`${import.meta.env.BASE_URL}shop/hourglass.png`} alt="" aria-hidden className="h-4 w-4 object-contain" /> {profile.hourglasses}
+              </span>
+            )}
+            {(profile.wards ?? 0) > 0 && (
+              <span
+                title="Оберег сам погасит следующее срабатывание способности босса"
+                className="flex items-center gap-1 rounded-full bg-arena-surface-2 px-2.5 py-1 text-[11px] font-bold tabular-nums text-arena-text"
+              >
+                <img src={`${import.meta.env.BASE_URL}shop/ward.png`} alt="" aria-hidden className="h-4 w-4 object-contain" /> Оберег · {profile.wards}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2">
           <AnimatePresence>

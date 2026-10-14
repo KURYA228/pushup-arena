@@ -1,6 +1,7 @@
 import { getRank, glows } from '../data/ranks';
 import clsx from 'clsx';
 import { useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 import { avatarSrc } from '../lib/avatar';
 
 /**
@@ -20,6 +21,9 @@ function hueOf(name: string): number {
   return Math.abs(h) % 360;
 }
 
+/** The Бессмертный crown, in px, for each avatar size — big enough to read as a crown. */
+const CROWN_PX = { sm: 16, md: 20, lg: 28 } as const;
+
 const SIZES = {
   sm: 'h-8 w-8 text-xs',
   md: 'h-11 w-11 text-base',
@@ -32,6 +36,7 @@ export function Avatar({
   className,
   level,
   avatar: chosen,
+  noCrown = false,
 }: {
   name: string;
   size?: keyof typeof SIZES;
@@ -40,6 +45,8 @@ export function Avatar({
   level?: number;
   /** What they chose for it (src/lib/avatar.ts); the letter when there's nothing, or it won't load. */
   avatar?: string | null;
+  /** Leave the Бессмертный crown off — first place on the board wears the board's own crown. */
+  noCrown?: boolean;
 }) {
   const trimmed = name.trim();
   const hue = hueOf(trimmed.toLowerCase());
@@ -86,11 +93,23 @@ export function Avatar({
       >
         {avatar}
       </span>
-      {rank.minLevel >= 95 && (
-        <span aria-hidden className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-[11px] leading-none">
-          👑
-        </span>
-      )}
+      {rank.minLevel >= 95 && !noCrown && <ImmortalCrown px={CROWN_PX[size]} />}
     </span>
+  );
+}
+
+/** Бессмертный's crown: sat on top of the frame, bobbing gently up and down. */
+function ImmortalCrown({ px }: { px: number }) {
+  const calm = useReducedMotion();
+  return (
+    <motion.span
+      aria-hidden
+      className="pointer-events-none absolute left-1/2 -translate-x-1/2 leading-none drop-shadow-[0_0_6px_rgba(253,224,71,0.8)]"
+      style={{ top: -px * 0.85, fontSize: px }}
+      animate={calm ? {} : { y: [0, -px * 0.18, 0] }}
+      transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+    >
+      👑
+    </motion.span>
   );
 }

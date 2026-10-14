@@ -11,6 +11,7 @@ import { GoblinMini, JackO } from './GoblinFx';
 import { MiniPo, PeachPetal } from './TaiLungFx';
 import { Mjolnir } from './UltronFx';
 import { Laurel, Spartan } from './KiryukhaFx';
+import { Avatar } from './PlayerBadge';
 
 /**
  * The bosses' abilities, acted out. Each signature move gets a little scene of its own over the
@@ -82,6 +83,8 @@ export interface Scene {
   art?: string;
   /** Which way round a scene with two versions plays — see the scene itself. */
   variant?: number;
+  /** The player, for the scenes that end on them — Kiryukha's wreath comes down on their head. */
+  player?: { name: string; avatar: string | null; level: number };
 }
 
 /** How long each scene runs, so the caller can clear it. */
@@ -3565,8 +3568,8 @@ export const LAUREL_AT_SEC = 1.3;
 /**
  * Kiryukha going down — the master of the arena beaten. He drops to one knee in a burst of sand,
  * his helmet coming off and rolling away; spartans run in from both sides and raise their spears;
- * and a golden laurel wreath floats down from above to where his head was — for the player now —
- * with rose petals falling over the whole arena. «НОВЫЙ ХОЗЯИН АРЕНЫ».
+ * the player rises in his place, and a golden laurel wreath floats down from above onto their
+ * head, with rose petals falling over the whole arena. «НОВЫЙ ХОЗЯИН АРЕНЫ».
  */
 function LaurelCrown({ scene }: BodyProps) {
   const L = LAUREL_AT_SEC;
@@ -3625,12 +3628,43 @@ function LaurelCrown({ scene }: BodyProps) {
           </motion.div>
         )),
       )}
-      {/* The wreath, floating down to where his head was. */}
+      {/* The player, rising where he stood: the arena's theirs now. */}
+      {scene.player && (
+        // An exact 64px square: left to size itself, the box picked up a line of text's height
+        // under the avatar, and the glow drawn to it came out an oval.
+        <motion.div
+          className="absolute flex h-16 w-16 items-center justify-center"
+          style={{ left: -32, top: -92 }}
+          initial={{ y: 140, scale: 0.4, opacity: 0 }}
+          animate={{ y: 0, scale: 1.35, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 170, damping: 16, delay: 0.35 }}
+        >
+          {/* A gold glow behind them that flares the moment the wreath lands. */}
+          <motion.span
+            aria-hidden
+            className="absolute -inset-3 rounded-full"
+            style={{ background: 'radial-gradient(circle, rgba(250,204,21,0.55), transparent 70%)' }}
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{ opacity: [0, 0.4, 1, 0.6], scale: [0.6, 1, 1.5, 1.2] }}
+            transition={{ duration: L + 0.6, times: [0, L / (L + 0.6) - 0.1, L / (L + 0.6), 1] }}
+          />
+          <div className="relative flex">
+            <Avatar name={scene.player.name} avatar={scene.player.avatar} level={scene.player.level} size="lg" />
+          </div>
+        </motion.div>
+      )}
+      {/* The wreath, floating down onto the player's head (or where his was). */}
       <motion.div
         className="absolute"
         style={{ left: -60, top: -60 }}
         initial={{ y: -scene.y - 100, rotate: -20, opacity: 0 }}
-        animate={{ y: [-scene.y - 100, -70, -80, -76], rotate: [-20, 8, -4, 0], opacity: [0, 1, 1, 1] }}
+        // On a player it comes down round the face — its branches open upward, so it frames the
+        // head rather than sitting on top of it like a pair of horns.
+        animate={{
+          y: scene.player ? [-scene.y - 100, -36, -48, -42] : [-scene.y - 100, -70, -80, -76],
+          rotate: [-20, 8, -4, 0],
+          opacity: [0, 1, 1, 1],
+        }}
         transition={{ duration: L, ease: 'easeOut', times: [0, 0.8, 0.9, 1] }}
       >
         <motion.div animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 1.2, delay: L, repeat: 2 }}>

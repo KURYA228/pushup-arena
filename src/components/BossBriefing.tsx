@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import type { BossDef } from '../data/bosses';
 import { BOSSES } from '../data/bosses';
 import { ABILITY_TIPS, abilityName, describeAbility } from '../data/abilities';
+import { AbilityIcon } from './AbilityIcon';
 import { BossIcon } from './BossIcon';
 
 // v2: the first version showed the report as the stage began and marked bosses seen then, so a
@@ -122,7 +123,7 @@ export function BossBriefing({ boss, index, onClose }: { boss: BossDef; index: n
               transition={{ delay: 0.15 + i * 0.1, type: 'spring', stiffness: 300, damping: 24 }}
               className="flex gap-3 rounded-2xl border border-arena-amber/30 bg-arena-surface-2 p-3"
             >
-              <span className="text-2xl leading-none">{ABILITY_TIPS[a.kind].icon}</span>
+              <AbilityIcon kind={a.kind} className="!h-11 !w-11 shrink-0 text-[2.2rem] leading-none" />
               <span className="min-w-0">
                 <span className="block text-sm font-bold text-arena-amber">{abilityName(a)}</span>
                 <span className="block text-xs leading-snug text-arena-text">{describeAbility(a)}</span>

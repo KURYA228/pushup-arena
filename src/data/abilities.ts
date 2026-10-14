@@ -195,36 +195,37 @@ export const ABILITY_INFO: Record<
 export const describeAbility = (a: BossAbility) => ABILITY_INFO[a.kind].describe(a.value);
 
 /**
- * An icon and one line of "how to beat it" per ability, for the scouting report shown before
+ * An icon — a drawn badge under `public/abilities/` (cut from the sheets by
+ * scripts/slice-ability-sheet.mjs), or an emoji until one's drawn — and one line of "how to beat it" per ability, for the scouting report shown before
  * a stage — knowing the rule is half of it; knowing what to do about it is the other half.
  */
 export const ABILITY_TIPS: Record<AbilityKind, { icon: string; tip: string }> = {
-  armor: { icon: '🛡️', tip: 'Просто больше повторов — обойти нельзя, только перебить.' },
-  critImmune: { icon: '🚫', tip: 'Улучшения на крит здесь не помогут — качай силу удара.' },
-  enrage: { icon: '😡', tip: 'Под конец он крепче — оставь силы на последние 40%.' },
-  bulwark: { icon: '🐢', tip: 'Начало тяжёлое, дальше легче — не сдавайся в первых подходах.' },
-  xpDrain: { icon: '📉', tip: 'Урон не меняется, просто меньше XP — бей как обычно.' },
-  regen: { icon: '💚', tip: `Не отдыхай — каждые ${SET_BREAK_MS / 1000} секунд паузы он лечится.` },
-  skipEvery: { icon: '👻', tip: 'Каждый N-й повтор мимо — закладывай лишние повторы.' },
-  noStop: { icon: '⏱️', tip: `Не отдыхай дольше ${NO_STOP_MS / 1000} секунд — иначе весь подход сотрётся.` },
-  evenOnly: { icon: '⚖️', tip: 'Бьёт только каждый второй — нужно вдвое больше повторов.' },
-  infection: { icon: '🦠', tip: 'Добивай подчинённых быстро, иначе следующий станет толще.' },
-  bloodDebt: { icon: '🩸', tip: 'Длинные подходы — пауза возвращает ему часть урона.' },
-  falseDeath: { icon: '💀', tip: 'На последнем HP не останавливайся — добивай без паузы.' },
-  mirror: { icon: '🪞', tip: 'Второй подчинённый встанет ещё раз — будь готов.' },
-  entryFee: { icon: '🪙', tip: 'Делай длинные подходы: касса берёт только первые повторы каждого.' },
-  piggyBank: { icon: '🥚', tip: 'Каждый третий повтор он крадёт яйцо и лечится. Бей много и быстро.' },
-  freezeRay: { icon: '❄️', tip: `Не останавливайся дольше ${FREEZE_PAUSE_MS / 1000} секунд — иначе заморозит.` },
-  retreat: { icon: '🏃', tip: 'На половине он подлечится один раз — это нормально, дожимай.' },
-  strictMom: { icon: '😤', tip: `Держи темп быстрее ${SET_BREAK_MS / 1000} секунд — после любой паузы первый повтор пропадёт.` },
-  scream: { icon: '😱', tip: 'Когда испугает — сделай 10 подряд без паузы, иначе урон сгорит.' },
-  jokerCard: { icon: '🃏', tip: 'Криты его лечат — улучшения на крит здесь вредят.' },
-  teamwork: { icon: '🤝', tip: 'Подходы минимум по 5 — короче не засчитаются.' },
-  endCrystals: { icon: '💎', tip: 'Подходы по 15 без паузы ломают кристаллы — потом урон полный.' },
-  tribute: { icon: '👑', tip: 'Каждый седьмой повтор подхода уходит в казну — закладывай лишние.' },
-  elixir: { icon: '🧪', tip: 'Бей без долгих пауз: дашь ему отдышаться — начнёшь сначала.' },
-  turtleSoup: { icon: '🍲', tip: `Не давай котлу закипеть: подход в ${SOUP_COOL_REPS} повторов без паузы остужает его.` },
-  treasury: { icon: '💰', tip: 'После половины HP богатыри прикроют его на 10 повторов — просто дожимай.' },
+  armor: { icon: 'abilities/armor.png', tip: 'Просто больше повторов — обойти нельзя, только перебить.' },
+  critImmune: { icon: 'abilities/critImmune.png', tip: 'Улучшения на крит здесь не помогут — качай силу удара.' },
+  enrage: { icon: 'abilities/enrage.png', tip: 'Под конец он крепче — оставь силы на последние 40%.' },
+  bulwark: { icon: 'abilities/bulwark.png', tip: 'Начало тяжёлое, дальше легче — не сдавайся в первых подходах.' },
+  xpDrain: { icon: 'abilities/xpDrain.png', tip: 'Урон не меняется, просто меньше XP — бей как обычно.' },
+  regen: { icon: 'abilities/regen.png', tip: `Не отдыхай — каждые ${SET_BREAK_MS / 1000} секунд паузы он лечится.` },
+  skipEvery: { icon: 'abilities/skipEvery.png', tip: 'Каждый N-й повтор мимо — закладывай лишние повторы.' },
+  noStop: { icon: 'abilities/noStop.png', tip: `Не отдыхай дольше ${NO_STOP_MS / 1000} секунд — иначе весь подход сотрётся.` },
+  evenOnly: { icon: 'abilities/evenOnly.png', tip: 'Бьёт только каждый второй — нужно вдвое больше повторов.' },
+  infection: { icon: 'abilities/infection.png', tip: 'Добивай подчинённых быстро, иначе следующий станет толще.' },
+  bloodDebt: { icon: 'abilities/bloodDebt.png', tip: 'Длинные подходы — пауза возвращает ему часть урона.' },
+  falseDeath: { icon: 'abilities/falseDeath.png', tip: 'На последнем HP не останавливайся — добивай без паузы.' },
+  mirror: { icon: 'abilities/mirror.png', tip: 'Второй подчинённый встанет ещё раз — будь готов.' },
+  entryFee: { icon: 'abilities/entryFee.png', tip: 'Делай длинные подходы: касса берёт только первые повторы каждого.' },
+  piggyBank: { icon: 'abilities/piggyBank.png', tip: 'Каждый третий повтор он крадёт яйцо и лечится. Бей много и быстро.' },
+  freezeRay: { icon: 'abilities/freezeRay.png', tip: `Не останавливайся дольше ${FREEZE_PAUSE_MS / 1000} секунд — иначе заморозит.` },
+  retreat: { icon: 'abilities/retreat.png', tip: 'На половине он подлечится один раз — это нормально, дожимай.' },
+  strictMom: { icon: 'abilities/strictMom.png', tip: `Держи темп быстрее ${SET_BREAK_MS / 1000} секунд — после любой паузы первый повтор пропадёт.` },
+  scream: { icon: 'abilities/scream.png', tip: 'Когда испугает — сделай 10 подряд без паузы, иначе урон сгорит.' },
+  jokerCard: { icon: 'abilities/jokerCard.png', tip: 'Криты его лечат — улучшения на крит здесь вредят.' },
+  teamwork: { icon: 'abilities/teamwork.png', tip: 'Подходы минимум по 5 — короче не засчитаются.' },
+  endCrystals: { icon: 'abilities/endCrystals.png', tip: 'Подходы по 15 без паузы ломают кристаллы — потом урон полный.' },
+  tribute: { icon: 'abilities/tribute.png', tip: 'Каждый седьмой повтор подхода уходит в казну — закладывай лишние.' },
+  elixir: { icon: 'abilities/elixir.png', tip: 'Бей без долгих пауз: дашь ему отдышаться — начнёшь сначала.' },
+  turtleSoup: { icon: 'abilities/turtleSoup.png', tip: `Не давай котлу закипеть: подход в ${SOUP_COOL_REPS} повторов без паузы остужает его.` },
+  treasury: { icon: 'abilities/treasury.png', tip: 'После половины HP богатыри прикроют его на 10 повторов — просто дожимай.' },
 };
 export const abilityName = (a: BossAbility) => ABILITY_INFO[a.kind].name;
 
@@ -262,4 +263,77 @@ export function damageDealt(
 
 export function xpMultiplier(abilities: BossAbility[]): number {
   return 1 - strength(abilities, 'xpDrain');
+}
+
+/* ------------------------------ new rounds (Круг) ------------------------------ */
+
+/**
+ * «Пройти снова» once the arena is beaten starts a new round (Круг 2, 3…): the same stages, the
+ * same HP and the same blows — only every boss's abilities are sharper and more dangerous. `tier`
+ * is how many rounds past the first; 0 is the arena as it was first fought.
+ */
+/** And the XP a rep earns grows by this much a round, so the harder fight pays. */
+export const TIER_XP = 0.25;
+/**
+ * The last round there is (Круг 5). Past it the abilities have nowhere sensible left to go —
+ * a boss you can't beat isn't a fight; the tests check every boss on it.
+ */
+export const MAX_TIER = 4;
+
+/** The round «Пройти снова» starts after `cycle` rounds past the first are done: the next, up to the last. */
+export const nextTier = (cycle: number | undefined) => Math.min(MAX_TIER, (cycle ?? 0) + 1);
+
+/** Each ability, one round harder. Kept per kind: "stronger" means a bigger share for some, a
+ * shorter wait for others, and nothing at all for the on/off ones. */
+function harderBy(kind: AbilityKind, value: number, t: number): number {
+  switch (kind) {
+    case 'armor':
+      return Math.min(0.5, value + 0.05 * t);
+    case 'enrage':
+    case 'bulwark':
+      return Math.min(0.7, value + 0.1 * t);
+    case 'bloodDebt':
+      return Math.min(0.6, value + 0.1 * t);
+    case 'retreat':
+      return Math.min(0.5, value + 0.1 * t);
+    case 'jokerCard':
+      return Math.min(1.5, value + 0.25 * t);
+    // The heals worked as a share of HP: a quarter more a round.
+    case 'regen':
+    case 'piggyBank':
+    case 'turtleSoup':
+      return value * (1 + 0.25 * t);
+    case 'skipEvery':
+      return Math.max(3, value - t);
+    case 'tribute':
+      return Math.max(4, value - t);
+    case 'infection':
+      return Math.max(8, value - 3 * t);
+    case 'strictMom':
+      return Math.max(3000, value - 1000 * t);
+    case 'elixir':
+      return Math.max(6, value - 2 * t);
+    case 'falseDeath':
+      return value + 5 * t;
+    case 'entryFee':
+    case 'freezeRay':
+      return value + t;
+    case 'scream':
+      return value + 3 * t;
+    case 'teamwork':
+      return value + 2 * t;
+    case 'treasury':
+      return value + 5 * t;
+    default:
+      // Flags (critImmune, evenOnly, mirror, endCrystals, noStop), and xpDrain, which costs the
+      // player XP rather than making the boss any harder to beat.
+      return value;
+  }
+}
+
+/** A boss's abilities as round `tier` has them. */
+export function hardenAbilities(abilities: BossAbility[], tier: number): BossAbility[] {
+  if (!(tier > 0)) return abilities;
+  // Rounded so 0.1 + 0.05 reads as 0.15 in the descriptions, not 0.15000000000000002.
+  return abilities.map((a) => ({ ...a, value: Math.round(harderBy(a.kind, a.value, Math.min(tier, MAX_TIER)) * 1000) / 1000 }));
 }

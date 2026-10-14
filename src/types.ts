@@ -1,4 +1,5 @@
 import type { AbilityEvent, BlockedReason, FightState } from './data/combat';
+import type { AbilityKind } from './data/abilities';
 import type { Upgrades } from './data/shop';
 import type { RankUp } from './data/ranks';
 import type { DuelDay } from './data/duel';
@@ -67,6 +68,18 @@ export interface ProfileRecord extends Training {
   adminRev?: number;
   /** Levels bought in the shop — see src/data/shop.ts. Absent on older saves. */
   upgrades?: Upgrades;
+  /** «Зелья ярости» in stock, and arena reps the one drunk still has to run (src/data/shop.ts). */
+  rage?: number;
+  rageLeft?: number;
+  /** «Обереги» in stock; one is spent each time it cancels a boss ability. */
+  wards?: number;
+  /** «Песочные часы» in stock — one shortens a rest between minions. */
+  hourglasses?: number;
+  /** «Двойной удар» in stock, and minion reps the one switched on still has to run. */
+  doubles?: number;
+  doubleLeft?: number;
+  /** The hardest round of the arena finished, past the first (1 = Круг 2 is done). */
+  cycle?: number;
   createdAt: string;
   /**
    * Which run of the game this progress belongs to — see src/lib/season.ts. Absent on saves
@@ -87,6 +100,11 @@ export interface ProfileRecord extends Training {
 export interface ReplayState {
   bossIndex: number;
   startedAt: number;
+  /**
+   * A new round (Круг) of the beaten arena: enemies tougher and abilities sharper by this many
+   * rounds (src/data/abilities.ts). Absent for a plain rematch of one stage.
+   */
+  tier?: number;
   returnTo: { currentBossIndex: number; stageStep: number; enemyHp: number; fight: FightState };
 }
 
@@ -122,6 +140,11 @@ export interface RepUndo {
   replayBefore?: ReplayState | null;
   /** Weekly count, current set and best set from before the rep. */
   trainingBefore?: Training;
+  /**
+   * What the rep used up: a rep of the potion running, a charm. Kept as amounts rather than a
+   * snapshot, so undoing a rep made before a potion was drunk doesn't pour the potion away.
+   */
+  itemsSpent?: { rageReps: number; wards: number; doubleReps?: number };
 }
 
 /**
@@ -145,6 +168,8 @@ export interface RepLogEntry {
 
 /** Result of registering a single rep, used to drive UI feedback (damage numbers, toasts, undo). */
 export interface RepResult {
+  /** The boss ability an «Оберег» cancelled on this rep, if one did. */
+  warded?: AbilityKind | null;
   xpGained: number;
   leveledUp: boolean;
   newLevel: number;

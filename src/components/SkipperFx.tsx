@@ -20,7 +20,8 @@ const IMPACTS: [number, number][] = [
 ];
 
 /** `royal`: the King's — the same pane in gold glass with his crown in it, instead of ice. */
-export function IceShield({ hpFrac, hitId, ready, royal = false }: { hpFrac: number; hitId: number | null; ready: boolean; royal?: boolean }) {
+/** `round`: the boss is shown as a circle (`artCircle`), so the shield is one too, a little inside the box where his picture fades out. */
+export function IceShield({ hpFrac, hitId, ready, royal = false, round = false }: { hpFrac: number; hitId: number | null; ready: boolean; royal?: boolean; round?: boolean }) {
   const up = ready && hpFrac > 0.6;
   const strikes = CRACK_AT.filter((t) => hpFrac <= t).length;
   const [seed] = useState(() => 1 + Math.floor(Math.random() * 100000));
@@ -30,7 +31,7 @@ export function IceShield({ hpFrac, hitId, ready, royal = false }: { hpFrac: num
         <motion.div
           key="shield"
           aria-hidden
-          className="pointer-events-none absolute inset-[-2%] z-10 overflow-hidden rounded-[18%]"
+          className={`pointer-events-none absolute z-10 overflow-hidden ${round ? 'inset-[3%] rounded-full' : 'inset-[-2%] rounded-[18%]'}`}
           style={
             royal
               ? {
