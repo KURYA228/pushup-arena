@@ -311,6 +311,35 @@ function FullForm({ cloud, signInOnly: startSignInOnly }: { cloud: Cloud; signIn
     clearGoogleExists();
   }, [googleExists, clearGoogleExists]);
 
+  // Google from the iPhone home screen reports its refusals later, once the code is collected.
+  const { googleError, clearGoogleError } = cloud;
+  useEffect(() => {
+    if (!googleError) return;
+    setError(`Вход через Google не удался: ${googleError}`);
+    setBusy(false);
+    clearGoogleError();
+  }, [googleError, clearGoogleError]);
+
+  // From the home screen Google opens in a sheet over the app, and this page stays put. Closing
+  // the sheet without signing in brings the player back here — the button should work again.
+  const [googleOut, setGoogleOut] = useState(false);
+  useEffect(() => {
+    if (!googleOut) return;
+    let timer = 0;
+    const onBack = () => {
+      if (document.visibilityState !== 'visible') return;
+      timer = window.setTimeout(() => {
+        setBusy(false);
+        setGoogleOut(false);
+      }, 3000);
+    };
+    document.addEventListener('visibilitychange', onBack);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onBack);
+    };
+  }, [googleOut]);
+
   const google = async (intent: 'signup' | 'signin') => {
     setBusy(true);
     setError(null);
@@ -320,7 +349,7 @@ function FullForm({ cloud, signInOnly: startSignInOnly }: { cloud: Cloud; signIn
     if (err) {
       setError(err.message);
       setBusy(false);
-    }
+    } else setGoogleOut(true);
   };
 
   const submit = async () => {

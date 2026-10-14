@@ -152,6 +152,24 @@ export function LeaderboardView({
 
   // Still fetching the public row. Without this the "Выбери имя" screen flashed for a couple of
   // seconds after every sign-in, because a missing name and an unfetched one looked identical.
+  if (cloud.name === undefined && cloud.nameError) {
+    return (
+      <div className="arena-page pb-8 pt-16 text-center">
+        <p className="text-base font-bold text-arena-text">Не удалось открыть таблицу</p>
+        <p className="mx-auto mt-2 max-w-sm text-sm leading-snug text-arena-text-dim">{cloud.nameError}</p>
+        <button
+          onClick={cloud.retryName}
+          className="mx-auto mt-5 rounded-xl bg-arena-surface-2 px-6 py-2.5 text-sm font-medium text-arena-text active:scale-95"
+        >
+          Повторить
+        </button>
+        <button onClick={() => void cloud.logout()} className="mt-3 block w-full text-center text-xs text-arena-text-dim underline">
+          Выйти из аккаунта
+        </button>
+      </div>
+    );
+  }
+
   if (cloud.name === undefined) {
     return (
       <div className="arena-page pb-8 pt-16 text-center">

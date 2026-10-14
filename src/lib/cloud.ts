@@ -5,6 +5,7 @@ import { weekRepsNow } from './training';
 import { streakView, todayLocal } from './streak';
 import { isStale } from './season';
 import { DUEL_START } from '../data/duel';
+import { isStandalone, platform } from './hints';
 
 /**
  * Accounts and the leaderboard, over Supabase.
@@ -19,7 +20,13 @@ import { DUEL_START } from '../data/duel';
  * policies the key would indeed be an open door.
  */
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+/**
+ * Where requests actually go. Mobile operators in Russia cut `*.supabase.co`, which left the game
+ * on the home screen with "no connection" off Wi‑Fi; a Yandex Cloud API Gateway in Russia relays
+ * everything to the project as is (README, «Прокси через Yandex Cloud»). Without it set, straight
+ * to Supabase as before.
+ */
+const url = (import.meta.env.VITE_SUPABASE_PROXY_URL || import.meta.env.VITE_SUPABASE_URL) as string | undefined;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 let client: SupabaseClient | null = null;
@@ -117,7 +124,7 @@ const authStorage = {
 function adoptLegacyToken() {
   if (authStorage.getItem(AUTH_STORAGE_KEY)) return;
   try {
-    const ref = new URL(url!).hostname.split('.')[0];
+    const ref = new URL(import.meta.env.VITE_SUPABASE_URL as string).hostname.split('.')[0];
     const legacy = read('local', `sb-${ref}-auth-token`);
     if (legacy) write('local', AUTH_STORAGE_KEY, legacy);
   } catch {
@@ -235,7 +242,13 @@ function translate(message: string): string {
   if (m.includes('signups not allowed') || m.includes('signup is disabled')) {
     return 'Регистрация отключена в настройках проекта.';
   }
-  if (m.includes('failed to fetch') || m.includes('network')) return 'Нет связи с сервером.';
+  // "Load failed" is Safari's word for a request that never left the phone. With the internet up,
+  // that is nearly always a content blocker: it lets the address through when typed by hand but
+  // stops the same request made from the page, so the player sees a site that "works" and a login
+  // that doesn't. Say so, with the way out — README, «Нет связи с сервером».
+  if (m.includes('failed to fetch') || m.includes('load failed') || m.includes('network')) {
+    return 'Нет связи с сервером. Если интернет есть — скорее всего, мешает блокировщик рекламы. iPhone: Настройки → Приложения → Safari → Расширения — выключи блокировщики или добавь в исключения kurya228.github.io и supabase.co. Ещё могут мешать VPN, AdGuard DNS, NextDNS и Частный узел iCloud. Потом закрой игру и открой заново.';
+  }
   if (m.includes('provider is not enabled') || m.includes('unsupported provider')) {
     return 'Вход через Google ещё не включён в настройках Supabase.';
   }
@@ -274,6 +287,44 @@ export async function retrySession(): Promise<Session | null> {
   const { data: fallback } = await db.auth.getSession();
   return fallback.session;
 }
+
+/**
+ * A Google sign-in coming back for the home-screen app on iPhone (see «Google from the home
+ * screen» below): `?handoff=<nonce>` plus the `code` — or the error — Supabase attached to it.
+ * Read once, at load, and taken out of the address before anything else looks at it, including
+ * the error reader below and the client's own URL detection.
+ */
+interface HandoffArrival {
+  nonce: string;
+  /** The auth code, or `error:<text>` when Google or Supabase said no. */
+  payload: string;
+  flowId: string | null;
+}
+
+const HANDOFF_ARRIVAL: HandoffArrival | null = (() => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const nonce = params.get('handoff');
+    if (!nonce) return null;
+    const code = params.get('code');
+    const err =
+      params.get('error_description') ?? hash.get('error_description') ?? params.get('error') ?? hash.get('error');
+    const flowId = params.get('sb_flow_id');
+    for (const k of ['handoff', 'code', 'sb_flow_id', 'error', 'error_code', 'error_description']) {
+      params.delete(k);
+      hash.delete(k);
+    }
+    const q = params.toString();
+    const h = hash.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${q ? `?${q}` : ''}${h ? `#${h}` : ''}`);
+    const payload = code ?? `error:${(err ?? 'Google не вернул код входа.').replace(/\+/g, ' ')}`;
+    return { nonce, payload, flowId };
+  } catch {
+    return null;
+  }
+})();
 
 /**
  * The error a sign-in through Google came back with, if it did — Supabase puts it in the address
@@ -442,12 +493,212 @@ export async function signInWithGoogle(intent: 'signup' | 'signin' = 'signin'): 
   } catch {
     // No storage: the check below just won't run, and Google signs into the account as usual.
   }
+  if (needsHandoff()) return startHandoff();
   const { error } = await db.auth.signInWithOAuth({
     provider: 'google',
     // Always the account picker, so a shared device doesn't silently reuse the last account.
     options: { redirectTo: redirectTarget(), queryParams: { prompt: 'select_account' } },
   });
   return error ? { message: translate(error.message) } : null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Google from the home screen
+ *
+ * On iPhone the game added to the home screen is sandboxed apart from Safari:
+ * it has storage of its own. Leaving the app's scope for Google opens a Safari
+ * sheet over it, and the trip back lands in that sheet too — so the session
+ * used to be saved in Safari's storage, and the app itself sat on the form.
+ *
+ * So for that one case the sign-in runs as PKCE: the app keeps the secret half
+ * (the code verifier), the sheet receives only the one-time code and parks it
+ * in Supabase under a random nonce (supabase/handoff.sql), and the app picks
+ * it up and trades it for a session itself. The code is worthless without the
+ * verifier, which never leaves the app.
+ * ------------------------------------------------------------------ */
+
+const HANDOFF_STORAGE_KEY = 'arena.handoff';
+const HANDOFF_PENDING_KEY = 'arena.handoff.pending';
+const HANDOFF_TTL_MS = 10 * 60 * 1000;
+const HANDOFF_POLL_MS = 2500;
+
+function needsHandoff(): boolean {
+  return platform() === 'ios' && isStandalone();
+}
+
+interface PendingHandoff {
+  nonce: string;
+  at: number;
+}
+
+function readPending(): PendingHandoff | null {
+  const raw = read('local', HANDOFF_PENDING_KEY);
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<PendingHandoff>;
+    return typeof v.nonce === 'string' && typeof v.at === 'number' ? { nonce: v.nonce, at: v.at } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Only the verifier goes to disk — it has to survive the app being suspended while the sheet is
+ * open. The session this client gets is handed straight to the main one, so it stays in memory:
+ * a second client holding the same refresh token on disk could refresh it and log the first out.
+ */
+const handoffMemory = new Map<string, string>();
+const handoffStorage = {
+  getItem: (key: string) => (key.endsWith('code-verifier') ? read('local', key) : handoffMemory.get(key) ?? null),
+  setItem: (key: string, value: string) => {
+    if (key.endsWith('code-verifier')) write('local', key, value);
+    else handoffMemory.set(key, value);
+  },
+  removeItem: (key: string) => {
+    drop('local', key);
+    handoffMemory.delete(key);
+  },
+};
+
+let handoffClient: SupabaseClient | null = null;
+
+function handoffDb(): SupabaseClient | null {
+  if (!cloudConfigured()) return null;
+  handoffClient ??= createClient(url!, anonKey!, {
+    auth: {
+      flowType: 'pkce',
+      storage: handoffStorage,
+      storageKey: HANDOFF_STORAGE_KEY,
+      persistSession: true,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+  return handoffClient;
+}
+
+function randomNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function startHandoff(): Promise<CloudError> {
+  const h = handoffDb();
+  if (!h) return { message: 'Облако не настроено.' };
+  const nonce = randomNonce();
+  write('local', HANDOFF_PENDING_KEY, JSON.stringify({ nonce, at: Date.now() } satisfies PendingHandoff));
+  // The nonce rides in the address Google returns to; the Redirect URLs allow list has to accept
+  // it, so it needs the wildcard form — README, «Вход через Google».
+  const { error } = await h.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: `${redirectTarget()}?handoff=${nonce}`, queryParams: { prompt: 'select_account' } },
+  });
+  if (error) {
+    drop('local', HANDOFF_PENDING_KEY);
+    return { message: translate(error.message) };
+  }
+  return null;
+}
+
+/**
+ * This page is the Safari sheet a sign-in came back to, not the app that started it: it should
+ * pass the code on and step aside, not boot the game.
+ */
+export function isHandoffRelay(): boolean {
+  return Boolean(HANDOFF_ARRIVAL) && readPending()?.nonce !== HANDOFF_ARRIVAL?.nonce;
+}
+
+/** In the Safari sheet: parks what came back from Google for the app to collect. */
+export async function relayHandoff(): Promise<CloudError> {
+  const h = handoffDb();
+  if (!h || !HANDOFF_ARRIVAL) return { message: 'Облако не настроено.' };
+  const { error } = await h.rpc('handoff_put', {
+    p_nonce: HANDOFF_ARRIVAL.nonce,
+    p_payload: HANDOFF_ARRIVAL.payload,
+    p_flow_id: HANDOFF_ARRIVAL.flowId,
+  });
+  if (!error) return null;
+  if (/handoff_put|function|schema cache/i.test(error.message)) {
+    return { message: 'В Supabase не запущен supabase/handoff.sql.' };
+  }
+  return { message: translate(error.message) };
+}
+
+/** In the app: trades the code for a session and hands it to the main client. */
+async function finishHandoff(payload: string, flowId: string | null): Promise<CloudError> {
+  drop('local', HANDOFF_PENDING_KEY);
+  if (payload.startsWith('error:')) return { message: translate(payload.slice('error:'.length)) };
+  const h = handoffDb();
+  const db = supabase();
+  if (!h || !db) return { message: 'Облако не настроено.' };
+  const { data, error } = await h.auth.exchangeCodeForSession(payload, flowId ? { flowId } : undefined);
+  handoffMemory.clear();
+  if (error || !data.session) return { message: translate(error?.message ?? 'Не удалось завершить вход.') };
+  // The main client saves it and announces SIGNED_IN, which `onAuthChange` picks up as usual.
+  const { error: setError } = await db.auth.setSession({
+    access_token: data.session.access_token,
+    refresh_token: data.session.refresh_token,
+  });
+  return setError ? { message: translate(setError.message) } : null;
+}
+
+let arrivalTaken = false;
+
+/**
+ * While a sign-in is out with Google, keeps asking whether its code has arrived — on a timer and
+ * the moment the app is looked at again. Also finishes one that came back into the app itself,
+ * which is what happens when iOS does keep the trip inside the installed app.
+ */
+export function watchHandoff(onError: (message: string) => void): () => void {
+  if (!cloudConfigured()) return () => {};
+  let alive = true;
+  let busy = false;
+
+  const settle = async (payload: string, flowId: string | null) => {
+    const err = await finishHandoff(payload, flowId);
+    if (err && alive) onError(err.message);
+  };
+
+  const tick = async () => {
+    const pending = readPending();
+    if (!pending || busy) return;
+    if (Date.now() - pending.at > HANDOFF_TTL_MS) {
+      drop('local', HANDOFF_PENDING_KEY);
+      return;
+    }
+    busy = true;
+    try {
+      const { data } = await handoffDb()!.rpc('handoff_take', { p_nonce: pending.nonce });
+      const row = (data as { payload: string; flow_id: string | null }[] | null)?.[0];
+      if (row) await settle(row.payload, row.flow_id);
+    } finally {
+      busy = false;
+    }
+  };
+
+  // Once per page load: StrictMode mounts twice, and a code can only be traded once.
+  if (HANDOFF_ARRIVAL && !isHandoffRelay() && !arrivalTaken) {
+    arrivalTaken = true;
+    busy = true;
+    void settle(HANDOFF_ARRIVAL.payload, HANDOFF_ARRIVAL.flowId).finally(() => {
+      busy = false;
+    });
+  } else {
+    void tick();
+  }
+
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') void tick();
+  };
+  const timer = window.setInterval(() => void tick(), HANDOFF_POLL_MS);
+  document.addEventListener('visibilitychange', onVisible);
+  window.addEventListener('focus', onVisible);
+  return () => {
+    alive = false;
+    window.clearInterval(timer);
+    document.removeEventListener('visibilitychange', onVisible);
+    window.removeEventListener('focus', onVisible);
+  };
 }
 
 /**
@@ -485,12 +736,29 @@ export async function signOut(forget = false): Promise<void> {
 }
 
 /** Creates the public row on first sign-in, or renames it later. */
+/**
+ * Who the server says is signed in — or why it couldn't say.
+ *
+ * `getUser` answers "no user" both for nobody signed in and for a request that never reached the
+ * server. Treating those alike is what told a signed-in player, with a content blocker eating the
+ * request, to "sign in first" — and showed them the pick-a-name screen besides.
+ */
+async function whoAmI(db: SupabaseClient): Promise<{ id: string } | { error: string }> {
+  const { data, error } = await db.auth.getUser();
+  if (data.user) return { id: data.user.id };
+  if (!error || /session missing/i.test(error.message)) return { error: 'Сначала войди в аккаунт.' };
+  if (/jwt|session|token|not found|does not exist/i.test(error.message)) {
+    return { error: 'Вход устарел — выйди из аккаунта и войди заново.' };
+  }
+  return { error: translate(error.message) };
+}
+
 export async function ensurePlayer(displayName: string): Promise<CloudError> {
   const db = supabase();
   if (!db) return { message: 'Облако не настроено.' };
-  const { data } = await db.auth.getUser();
-  const id = data.user?.id;
-  if (!id) return { message: 'Сначала войди в аккаунт.' };
+  const me = await whoAmI(db);
+  if ('error' in me) return { message: me.error };
+  const { id } = me;
 
   const name = displayName.trim();
   if (name.length < 2 || name.length > 24) return { message: 'Имя должно быть от 2 до 24 символов.' };
@@ -499,13 +767,23 @@ export async function ensurePlayer(displayName: string): Promise<CloudError> {
   return error ? { message: translate(error.message) } : null;
 }
 
-export async function getMyName(): Promise<string | null> {
+/**
+ * The name on the board, `null` when there's genuinely none yet — and an error when the server
+ * couldn't be asked, which must not be mistaken for "no name" and land on the pick-a-name screen.
+ */
+export async function fetchMyName(): Promise<{ name: string | null } | { error: string }> {
   const db = supabase();
-  if (!db) return null;
-  const { data: auth } = await db.auth.getUser();
-  if (!auth.user) return null;
-  const { data } = await db.from('players').select('display_name').eq('id', auth.user.id).maybeSingle();
-  return (data?.display_name as string | undefined) ?? null;
+  if (!db) return { name: null };
+  const me = await whoAmI(db);
+  if ('error' in me) return me;
+  const { data, error } = await db.from('players').select('display_name').eq('id', me.id).maybeSingle();
+  if (error) return { error: translate(error.message) };
+  return { name: (data?.display_name as string | undefined) ?? null };
+}
+
+export async function getMyName(): Promise<string | null> {
+  const r = await fetchMyName();
+  return 'name' in r ? r.name : null;
 }
 
 /**

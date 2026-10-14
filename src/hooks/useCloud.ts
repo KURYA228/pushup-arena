@@ -7,6 +7,7 @@ import {
   fetchLeaderboard,
   fetchDuelOpponents,
   fetchSave,
+  fetchMyName,
   forgetAccount,
   getMyName,
   getMyAvatar,
@@ -27,6 +28,7 @@ import {
   signOut,
   signUp,
   takeGoogleSignupClash,
+  watchHandoff,
   clearPendingName,
   peekPendingName,
   type CloudError,
@@ -101,6 +103,11 @@ export function useCloud(
    */
   const [unreachable, setUnreachable] = useState(false);
 
+  /** The name couldn't be fetched (no connection, stale sign-in) — why, for the board to show. */
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [nameAttempt, setNameAttempt] = useState(0);
+  const retryName = useCallback(() => setNameAttempt((n) => n + 1), []);
+
   /** "Register with Google" landed in an account that already existed — signed back out of it. */
   const [googleExists, setGoogleExists] = useState(false);
   /**
@@ -173,12 +180,20 @@ export function useCloud(
   useEffect(() => {
     if (!session) {
       setName(undefined);
+      setNameError(null);
       return;
     }
     let alive = true;
     setName(undefined);
+    setNameError(null);
     void (async () => {
-      let current = await getMyName();
+      const first = await fetchMyName();
+      // Couldn't ask — say why and offer a retry, rather than claim there's no name.
+      if ('error' in first) {
+        if (alive) setNameError(first.error);
+        return;
+      }
+      let current = first.name;
       // Coming back from a confirmation link: the session is new and the public row was never
       // created, but the name typed at sign-up is still waiting in storage. The name is only
       // discarded once the row it was meant for actually exists — otherwise a single failed
@@ -211,7 +226,7 @@ export function useCloud(
     return () => {
       alive = false;
     };
-  }, [session]);
+  }, [session, nameAttempt]);
 
   // Push on change, debounced. The signature keeps the effect from firing on unrelated renders.
   const signature = profile
@@ -390,6 +405,11 @@ export function useCloud(
   }, []);
   const clearGoogleExists = useCallback(() => setGoogleExists(false), []);
 
+  /** Google from the iPhone home screen comes back by way of Supabase — see `watchHandoff`. */
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  useEffect(() => watchHandoff(setGoogleError), []);
+  const clearGoogleError = useCallback(() => setGoogleError(null), []);
+
   const login = useCallback(async (email: string, password: string, displayName: string) => {
     const err = await signIn(email, password);
     if (err) return err;
@@ -485,6 +505,8 @@ export function useCloud(
       ready,
       session,
       name,
+      nameError,
+      retryName,
       avatar,
       setAvatar,
       uploadAvatarPhoto,
@@ -501,6 +523,8 @@ export function useCloud(
       googleLogin,
       googleExists,
       clearGoogleExists,
+      googleError,
+      clearGoogleError,
       logout,
       rename,
       retry,
@@ -515,6 +539,8 @@ export function useCloud(
       ready,
       session,
       name,
+      nameError,
+      retryName,
       avatar,
       setAvatar,
       uploadAvatarPhoto,
@@ -531,6 +557,8 @@ export function useCloud(
       googleLogin,
       googleExists,
       clearGoogleExists,
+      googleError,
+      clearGoogleError,
       logout,
       rename,
       retry,

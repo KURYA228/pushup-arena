@@ -2,6 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { HandoffRelay } from './components/HandoffRelay.tsx'
+import { isHandoffRelay } from './lib/cloud.ts'
 
 // In dev, tear down any service worker left over from a production build served on the same
 // origin. vite-plugin-pwa doesn't register one here, but a worker installed earlier by
@@ -52,8 +54,10 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   askForUpdate()
 }
 
+// The Safari sheet a Google sign-in from the iPhone home screen came back to: it only relays the
+// code to the installed app (see `watchHandoff` in lib/cloud.ts), it doesn't run the game.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {isHandoffRelay() ? <HandoffRelay /> : <App />}
   </StrictMode>,
 )

@@ -60,8 +60,19 @@ export function unlockedAvatars(profile: ProfileRecord): Set<string> {
 export function avatarSrc(value: string | null | undefined): string | null {
   if (!value) return null;
   if (value.startsWith(GALLERY_PREFIX)) return bossArtUrl(value.slice(GALLERY_PREFIX.length), true);
-  if (/^https:\/\//.test(value)) return value;
+  if (/^https:\/\//.test(value)) return throughProxy(value);
   return null;
+}
+
+/**
+ * Photos uploaded before the proxy were saved with the project's own address, which mobile
+ * operators block — so they're fetched through the proxy too, like everything else.
+ */
+const DIRECT = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const PROXY = import.meta.env.VITE_SUPABASE_PROXY_URL as string | undefined;
+
+function throughProxy(src: string): string {
+  return DIRECT && PROXY && src.startsWith(`${DIRECT}/`) ? PROXY + src.slice(DIRECT.length) : src;
 }
 
 /** The side of the square an uploaded photo is cut down to, in px — plenty for any avatar on screen. */
