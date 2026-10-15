@@ -924,32 +924,20 @@ export function playBossDefeat(prefs: FeedbackPrefs) {
 }
 
 /**
- * A command from the anti-cheat check (lib/liveness.ts), said out loud: the player is face down
- * over the floor and won't see the screen. Two sharp pips to get attention, then the words in a
- * Russian voice — the announcer's English one would mangle them.
+ * The screen guard (lib/screenGuard.ts) has stopped counting: three low pips and the reason out
+ * loud — the player is face down over the floor and won't see the banner.
  */
-export function playChallenge(prefs: FeedbackPrefs, text: string) {
+export function playScreenAlarm(prefs: FeedbackPrefs) {
   if (prefs.sound) {
     const c = audioContext();
     if (c) {
-      tone(c, 1046, 0, 0.09, 0.26);
-      tone(c, 1046, 0.14, 0.09, 0.26);
+      tone(c, 330, 0, 0.12, 0.28);
+      tone(c, 330, 0.18, 0.12, 0.28);
+      tone(c, 247, 0.36, 0.22, 0.28);
     }
-    sayRussian(text);
+    sayRussian('Камера снимает экран. Повторы не считаются.');
   }
-  buzz(prefs, [80, 60, 80]);
-}
-
-/** The command was done: a quick rising pair, and counting goes on. */
-export function playChallengePassed(prefs: FeedbackPrefs) {
-  if (prefs.sound) {
-    const c = audioContext();
-    if (c) {
-      tone(c, 660, 0, 0.08);
-      tone(c, 990, 0.07, 0.14);
-    }
-  }
-  buzz(prefs, 40);
+  buzz(prefs, [120, 80, 120, 80, 200]);
 }
 
 function sayRussian(text: string) {

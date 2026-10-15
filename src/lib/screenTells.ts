@@ -4,7 +4,7 @@
  *
  * None of these is proof on its own, and how strongly each shows depends on the screen, the
  * distance and the light. That's why every reading is exposed as a number (the measurement mode
- * in the camera settings shows them live): the thresholds below are starting guesses, to be set
+ * in the dev panel shows them live): the thresholds below are starting guesses, to be set
  * from real side-by-side runs, a person versus a video.
  *
  * Works on a small RGBA frame (the video drawn into a canvas of a few dozen pixels a side) and
@@ -47,15 +47,18 @@ export interface ScreenThresholds {
   maxSize: number;
 }
 
-/** Starting guesses — see the note at the top. */
+/**
+ * Strict on purpose (see lib/screenGuard.ts): lower than the first guesses, so a screen trips two
+ * of them easily. Still starting points — set them from real runs with the dev panel's readout.
+ */
 export const SCREEN_THRESHOLDS: ScreenThresholds = {
-  glow: 2.2,
-  maxEdgeLuma: 50,
-  border: 0.6,
-  bands: 0.5,
-  moire: 0.6,
-  glare: 0.6,
-  maxSize: 0.33,
+  glow: 1.8,
+  maxEdgeLuma: 70,
+  border: 0.5,
+  bands: 0.4,
+  moire: 0.5,
+  glare: 0.5,
+  maxSize: 0.4,
 };
 
 export type TellName = 'glow' | 'border' | 'bands' | 'moire' | 'glare' | 'small';

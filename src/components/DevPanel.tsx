@@ -9,7 +9,7 @@ import { ACHIEVEMENTS } from '../data/achievements';
 import { totalXpForLevel } from '../data/leveling';
 import { BossIcon } from './BossIcon';
 import { MAX_FREEZES, freezesOf, todayLocal } from '../lib/streak';
-import { setPlusCountsReps, usePlusCountsReps } from '../lib/devFlags';
+import { setPlusCountsReps, setScreenMeter, usePlusCountsReps, useScreenMeter } from '../lib/devFlags';
 import { UPGRADES, upgradeLevel } from '../data/shop';
 import { cloudConfigured, isAdmin } from '../lib/cloud';
 import { AdminPanel } from './AdminPanel';
@@ -95,6 +95,7 @@ export function DevPanel({
   onClose: () => void;
 }) {
   const plusCounts = usePlusCountsReps();
+  const screenMeter = useScreenMeter();
   const log = useRepLog();
   const ringToday = log ? repsToday(log, Date.now()) : 0;
   const ringWeek = log ? repsThisWeek(log, Date.now()) : 0;
@@ -490,6 +491,17 @@ export function DevPanel({
             {plusCounts
               ? '«+» бьёт босса, даёт XP и идёт в общий счёт — как отжимание с камеры. Только на этом устройстве.'
               : '«+» считает только нажатия в кликер и не влияет на игру.'}
+          </p>
+        </Group>
+
+        <Group title="Детектор экрана">
+          <Row>
+            <Action onClick={() => setScreenMeter(false)}>{screenMeter ? 'Скрыть замеры' : '✓ Скрыть замеры'}</Action>
+            <Action onClick={() => setScreenMeter(true)}>{screenMeter ? '✓ Показать замеры' : 'Показать замеры'}</Action>
+          </Row>
+          <p className="text-[10px] leading-snug text-arena-text-dim">
+            Числа детектора под камерой в бою — чтобы сравнить себя и видео на другом экране. Сам детектор
+            включён всегда.
           </p>
         </Group>
 

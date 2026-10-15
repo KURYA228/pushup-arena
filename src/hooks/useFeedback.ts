@@ -91,8 +91,7 @@ import {
   vibrationSupported,
   applyAudioSession,
   audioSessionSupported,
-  playChallenge,
-  playChallengePassed,
+  playScreenAlarm,
   type FeedbackPrefs,
 } from '../lib/feedback';
 
@@ -130,8 +129,7 @@ export function useFeedback() {
       bossDefeat: () => playBossDefeat(prefs),
       bossEncounter: (line?: Line) => playBossEncounter(prefs, line),
       levelUp: () => playLevelUp(prefs),
-      challenge: (text: string) => playChallenge(prefs, text),
-      challengePassed: () => playChallengePassed(prefs),
+      screenAlarm: () => playScreenAlarm(prefs),
       rankUp: () => playRankUp(prefs),
       rushEnd: () => playRushEnd(prefs),
       purchase: () => playPurchase(prefs),

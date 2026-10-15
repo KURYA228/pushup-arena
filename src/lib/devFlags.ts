@@ -6,28 +6,48 @@ import { useSyncExternalStore } from 'react';
  */
 
 const PLUS_COUNTS_KEY = 'arena.dev.plusCountsReps';
+const SCREEN_METER_KEY = 'arena.dev.screenMeter';
 const EVENT = 'arena-dev-flags';
 
-function read(): boolean {
+function flag(key: string): boolean {
   try {
-    return localStorage.getItem(PLUS_COUNTS_KEY) === '1';
+    return localStorage.getItem(key) === '1';
   } catch {
     return false;
   }
 }
+
+function setFlag(key: string, on: boolean) {
+  try {
+    if (on) localStorage.setItem(key, '1');
+    else localStorage.removeItem(key);
+  } catch {
+    // No storage — the switch just won't stick.
+  }
+  window.dispatchEvent(new Event(EVENT));
+}
+
+const read = () => flag(PLUS_COUNTS_KEY);
+const readScreenMeter = () => flag(SCREEN_METER_KEY);
 
 /**
  * «+» counts as a real rep instead of a clicker tap — so bosses, XP and the shop can be tested
  * without doing every push-up on camera.
  */
 export function setPlusCountsReps(on: boolean) {
-  try {
-    if (on) localStorage.setItem(PLUS_COUNTS_KEY, '1');
-    else localStorage.removeItem(PLUS_COUNTS_KEY);
-  } catch {
-    // No storage — the switch just won't stick.
-  }
-  window.dispatchEvent(new Event(EVENT));
+  setFlag(PLUS_COUNTS_KEY, on);
+}
+
+/**
+ * The screen detector's numbers under the camera (lib/screenTells.ts) — for setting its
+ * thresholds from real runs. Only the readout: the detector itself is always on.
+ */
+export function setScreenMeter(on: boolean) {
+  setFlag(SCREEN_METER_KEY, on);
+}
+
+export function useScreenMeter(): boolean {
+  return useSyncExternalStore(subscribe, readScreenMeter, () => false);
 }
 
 function subscribe(cb: () => void) {

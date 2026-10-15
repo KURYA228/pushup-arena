@@ -14,7 +14,7 @@ import {
   type Strictness,
 } from '../lib/repDetector';
 import { openCamera, startVideo } from '../lib/camera';
-import { Liveness, type LivenessArm, type LivenessFrame, type LivenessSnapshot } from '../lib/liveness';
+import { ScreenGuard, type GuardSnapshot } from '../lib/screenGuard';
 import { ScreenTells, tellsShowing, type BodyBox, type ScreenReadings, type TellName } from '../lib/screenTells';
 
 // Loaded lazily on first camera use so the ~1.5MB MediaPipe JS never ships in the main bundle
@@ -267,32 +267,13 @@ function extractSample(world: Landmark[], screen: NormalizedLandmark[], aspect: 
 }
 
 /**
- * The anti-cheat check (lib/liveness.ts) — one per page, not per mount, so switching to manual
- * and back or leaving the fight doesn't wipe a pending command.
+ * The screen guard (lib/screenGuard.ts) — one per page, not per mount, so switching to manual and
+ * back or leaving the fight doesn't lift a block.
  */
-const liveness = new Liveness();
-
-/** Every arm whose three joints are confidently visible, for the liveness commands. */
-function livenessFrame(screen: NormalizedLandmark[], sample: PoseSample | null, aspect: number): LivenessFrame {
-  const pt = (i: number) => ({ x: screen[i].x * aspect, y: screen[i].y });
-  const arms: LivenessArm[] = ARMS.filter(
-    (a) =>
-      visibility(screen[a.shoulder]) >= MIN_VISIBILITY &&
-      visibility(screen[a.elbow]) >= MIN_VISIBILITY &&
-      visibility(screen[a.wrist]) >= MIN_VISIBILITY,
-  ).map((a) => ({ shoulder: pt(a.shoulder), elbow: pt(a.elbow), wrist: pt(a.wrist) }));
-  const scale =
-    sample?.scale ??
-    (arms[0] ? Math.hypot(arms[0].shoulder.x - arms[0].elbow.x, arms[0].shoulder.y - arms[0].elbow.y) * 2 : 0.3);
-  return { angle: sample?.angle ?? null, arms, scale };
-}
+const guard = new ScreenGuard();
 
 /** How often the frame is checked for screen tells (lib/screenTells.ts). */
 const TELLS_EVERY_MS = 500;
-/** This many looks in a row with ≥2 tells: commands come more often. */
-const TELLS_STREAK = 6;
-/** This many looks in a row with ≥3 tells: a command right now. */
-const TELLS_ALARM_STREAK = 4;
 const TELLS_W = 96;
 const TELLS_H = 72;
 
@@ -380,9 +361,9 @@ export function usePoseDetection(onRep: () => void) {
   const trackingSinceRef = useRef(0);
   const lowFpsRef = useRef(0);
 
-  const [livenessSnap, setLivenessSnap] = useState<LivenessSnapshot>(() => liveness.snapshot(performance.now()));
+  const [guardSnap, setGuardSnap] = useState<GuardSnapshot>(() => guard.snapshot());
   const tellsCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const tellsRef = useRef({ at: 0, streak: 0, alarm: 0, tells: new ScreenTells() });
+  const tellsRef = useRef({ at: 0, tells: new ScreenTells() });
   const [screenCheck, setScreenCheck] = useState<ScreenCheck>({ readings: null, tells: [] });
 
   /** Until when the skeleton flashes bright green: the moment a rep has just counted. */
@@ -529,7 +510,6 @@ export function usePoseDetection(onRep: () => void) {
           if (!screen || !world) {
             detector.markPoseLost();
             setQuality('no-pose');
-            liveness.push(null, now);
           } else {
             const sample = extractSample(world, screen, frameAspect);
             if (sample == null) {
@@ -537,17 +517,15 @@ export function usePoseDetection(onRep: () => void) {
               setQuality('arm-hidden');
             } else {
               setQuality('ok');
-              // A rep counts only while no command is pending (lib/liveness.ts).
-              if (detector.push(sample, now) && liveness.rep(now)) {
+              // A rep counts only while the picture doesn't look like a screen (lib/screenGuard.ts).
+              if (detector.push(sample, now) && guard.rep(now)) {
                 flashUntilRef.current = now + 350;
                 onRepRef.current();
               }
             }
-            liveness.push(livenessFrame(screen, sample, frameAspect), now);
 
-            // Twice a second, the tells that this is a screen and not a room (lib/screenTells.ts).
-            // Two of them make the commands come more often; three, a command right now — which,
-            // with the reps it takes back, is what stops a video. Never a block on their own.
+            // Twice a second, the tells that this is a screen and not a room (lib/screenTells.ts),
+            // handed to the guard, which stops counting and takes back recent reps on a screen.
             const st = tellsRef.current;
             const box = bodyBox(screen);
             if (box && now - st.at >= TELLS_EVERY_MS) {
@@ -559,21 +537,14 @@ export function usePoseDetection(onRep: () => void) {
                   const readings = st.tells.analyze(px, TELLS_W, TELLS_H, box);
                   const tells = tellsShowing(readings);
                   setScreenCheck({ readings, tells });
-                  st.streak = tells.length >= 2 ? st.streak + 1 : 0;
-                  st.alarm = tells.length >= 3 ? st.alarm + 1 : 0;
-                  if (st.streak >= TELLS_STREAK) liveness.markSuspicious();
-                  if (st.alarm >= TELLS_ALARM_STREAK) {
-                    st.alarm = 0;
-                    liveness.markSuspicious();
-                    liveness.challengeNow(now);
-                  }
+                  guard.look(tells.length, now);
+                  setGuardSnap(guard.snapshot());
                 }
               } catch {
                 // A frame the canvas couldn't read — try again on the next look.
               }
             }
           }
-          setLivenessSnap(liveness.snapshot(now));
           const snap = detector.snapshot();
           // Drawn after the detector has seen the frame, so the colour says where this rep stands now.
           drawSkeleton(screen, vis, snap.phase === 'down', now);
@@ -754,8 +725,8 @@ export function usePoseDetection(onRep: () => void) {
     fps,
     aspect,
     snapshot,
-    /** The anti-cheat command, if one is pending (lib/liveness.ts). */
-    liveness: livenessSnap,
+    /** Whether counting is stopped because the picture looks like a screen (lib/screenGuard.ts). */
+    guard: guardSnap,
     /** The latest screen-tell readings, for the measurement mode. */
     screenCheck,
     notice,
