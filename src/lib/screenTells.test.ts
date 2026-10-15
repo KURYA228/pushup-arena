@@ -85,14 +85,20 @@ test('a screen in a dim room shows several', () => {
   assert.ok(screenScore(r) >= 2);
 });
 
-// The first real runs, read off the dev panel (laptop webcam, 15 October 2026).
-const LIVE: ScreenReadings = { glow: 0.62, edgeLuma: 193, border: 0.52, bands: 0.26, moire: 0.71, glare: 0.83, size: 0.64 };
-const PHONE_VIDEO: ScreenReadings = { glow: 1.09, edgeLuma: 136, border: 0.84, bands: 0.2, moire: 0.59, glare: 0, size: 0.54 };
+// Real runs, read off the dev panel (laptop webcam, 15 October 2026).
+const LIVE: ScreenReadings[] = [
+  { glow: 0.62, edgeLuma: 193, border: 0.52, bands: 0.26, moire: 0.71, glare: 0.83, size: 0.64 },
+  { glow: 0.52, edgeLuma: 255, border: 0.69, bands: 0.22, moire: 0.68, glare: 0.91, size: 0.74 },
+];
+const PHONE_VIDEO: ScreenReadings[] = [
+  { glow: 1.09, edgeLuma: 136, border: 0.84, bands: 0.2, moire: 0.59, glare: 0, size: 0.54 },
+  { glow: 1.54, edgeLuma: 102, border: 1.0, bands: 0.15, moire: 0.87, glare: 0, size: 0.35 },
+];
 
-test('real run: a live person in front of a window is not a screen', () => {
-  assert.ok(screenScore(LIVE) < 2, `score ${screenScore(LIVE)}`);
+test('real runs: a live person in front of a window is not a screen', () => {
+  for (const r of LIVE) assert.ok(screenScore(r) < 2, `score ${screenScore(r)} for ${JSON.stringify(r)}`);
 });
 
-test('real run: a phone playing a push-up video is', () => {
-  assert.ok(screenScore(PHONE_VIDEO) >= 2, `score ${screenScore(PHONE_VIDEO)}`);
+test('real runs: a phone playing a push-up video is', () => {
+  for (const r of PHONE_VIDEO) assert.ok(screenScore(r) >= 2, `score ${screenScore(r)} for ${JSON.stringify(r)}`);
 });

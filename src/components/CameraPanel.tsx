@@ -545,7 +545,7 @@ const TELL_ROWS: { tell: TellName; label: string; value: (r: ScreenReadings) => 
     tell: 'glow',
     label: 'Свечение',
     value: (r) => `${r.glow.toFixed(2)} · края ${Math.round(r.edgeLuma)}`,
-    limit: `≥${SCREEN_THRESHOLDS.glow} и края ≤${SCREEN_THRESHOLDS.maxEdgeLuma}`,
+    limit: `≥${SCREEN_THRESHOLDS.glow}`,
   },
   {
     tell: 'border',

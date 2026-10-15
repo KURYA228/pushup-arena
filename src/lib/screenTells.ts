@@ -50,17 +50,25 @@ export interface ScreenThresholds {
 }
 
 /**
- * Set from the first real runs (15 October 2026, a laptop webcam): a live person read border 0.52,
- * moiré 0.71, glare 0.83 (a window behind); a phone playing a push-up video held up to the camera
- * read border 0.84, moiré 0.59, glare 0. Only the border told them apart — the phone's edge is a
- * hard straight line — so a clear border counts double, and moiré and glare, which fired on the
- * live person (webcam noise, a bright window), are shown in the readout but don't count at all.
+ * Set from real runs (15 October 2026, a laptop webcam, bright windows behind), two of each:
+ *
+ *               border  glow   size   moiré  glare
+ *   live        0.52    0.62   0.64   0.71   0.83
+ *   live        0.69    0.52   0.74   0.68   0.91
+ *   phone video 0.84    1.09   0.54   0.59   0.00
+ *   phone video 1.00    1.54   0.35   0.87   0.00
+ *
+ * The border (the phone's edge is a hard straight line) and the glow (the phone's screen against
+ * the room) tell them apart; a clear border counts double. The glow no longer needs dark frame
+ * edges — the windows here were the brightest thing in the room and the screen still stood out.
+ * Moiré and glare fired on the live person (webcam noise, a bright window): shown in the readout,
+ * not counted.
  */
 export const SCREEN_THRESHOLDS: ScreenThresholds = {
-  glow: 1.8,
-  maxEdgeLuma: 70,
+  glow: 1.3,
+  maxEdgeLuma: 255,
   border: 0.5,
-  borderStrong: 0.7,
+  borderStrong: 0.8,
   bands: 0.4,
   moire: 0.5,
   glare: 0.5,
