@@ -215,14 +215,14 @@ const HOST_GREET = `${import.meta.env.BASE_URL}intro/host-greet.webp`;
 
 /**
  * His lines, in four bubbles: who he is, then — turning to offer his hand — who you are, your
- * age, and the way in. Written to be voiced, so none of them has the player's nickname in it —
- * a recording can't say it. The last one hints at the finale, where he turns out to be the boss.
+ * age, and the way in. The last two greet you by your nickname on screen; a voiced version skips
+ * the name. The last one hints at the finale, where he turns out to be the boss.
  */
 const HELLO = 'Здравствуй, воин! Это мой Колизей — я построил его своими руками. И сила здесь меряется только одним — отжиманиями.';
 const MEET = 'Но сначала давай познакомимся. Меня зовут Кирюха. А тебя как звать?';
-const ASK_AGE = 'Приятно познакомиться! А скажи-ка, сколько тебе лет?';
-const WELCOME =
-  'Отлично. Тогда слушай: впереди пятнадцать боссов, и каждое отжимание — это удар. Дойдёшь до конца — и мы с тобой ещё встретимся. Вперёд!';
+const askAge = (name: string) => `Приятно познакомиться, ${name}! А скажи-ка, сколько тебе лет?`;
+const welcome = (name: string) =>
+  `Отлично, ${name}. Тогда слушай: впереди пятнадцать боссов, и каждое отжимание — это удар. Дойдёшь до конца — и мы с тобой ещё встретимся. Вперёд!`;
 
 /** The pause between his question being typed out and the answer card appearing. */
 const ANSWER_DELAY_MS = 300;
@@ -335,9 +335,9 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
       : step === 'meet' || step === 'name'
         ? { text: MEET, from: 0 }
         : step === 'ask-age' || step === 'age'
-          ? { text: ASK_AGE, from: 0 }
+          ? { text: askAge(name), from: 0 }
           : step === 'welcome'
-            ? { text: WELCOME, from: 0 }
+            ? { text: welcome(name), from: 0 }
             : null;
   // One bubble per thought: who he is, then the introduction (which stays up while you answer).
   const lineKey = step === 'name' ? 'meet' : step === 'age' ? 'ask-age' : step;
