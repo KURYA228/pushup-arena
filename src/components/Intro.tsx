@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Info, SkipForward } from 'lucide-react';
 import { AGE_MAX, AGE_MIN, NICK_MAX, NICK_MIN, markIntroSeen, readIntroAbout, saveIntroAbout } from '../lib/intro';
+import { introLineMs, playIntroLine, stopIntroLine, type IntroLine } from '../lib/feedback';
 
 /**
  * The cold open: a title screen over the Colosseum, then the host getting to know you. Shown once — the flag lives in localStorage, and the dev panel can put it back.
@@ -235,6 +236,10 @@ const T = {
   speak: 2.1,
 };
 
+/** Punctuation holds the typing about five letters' worth, so a sentence has its pauses. */
+const PAUSE_WEIGHT = 5;
+const isPause = (ch: string | undefined) => Boolean(ch && /[,.!?—:]/.test(ch));
+
 /**
  * A line typed out letter by letter, the way a character speaks in a game. `skip` shows the
  * rest at once — the first tap on a line finishes it, the second moves on.
@@ -244,16 +249,25 @@ function Typewriter({
   skip,
   onDone,
   startAt = 0,
+  durationMs = null,
 }: {
   text: string;
   skip: boolean;
   onDone: () => void;
   /** Letters already on screen — a line that carries on from the one before it. */
   startAt?: number;
+  /** How long the voiced line runs: the typing keeps pace with it, finishing a touch ahead. */
+  durationMs?: number | null;
 }) {
   const calm = useReducedMotion();
   const [shown, setShown] = useState(calm ? text.length : startAt);
   const done = skip || shown >= text.length;
+  // One letter's worth of time: from the voice when there is one, the old fixed pace otherwise.
+  const [unit] = useState(() => {
+    if (!durationMs) return 26;
+    const weight = Array.from(text).reduce((sum, ch) => sum + (isPause(ch) ? PAUSE_WEIGHT : 1), 0);
+    return Math.max(26, (durationMs * 0.9) / Math.max(1, weight));
+  });
 
   useEffect(() => {
     if (done) {
@@ -261,8 +275,7 @@ function Typewriter({
       return;
     }
     // A touch slower on punctuation, so a sentence has its pauses.
-    const prev = text[shown - 1];
-    const wait = prev && /[,.!?—]/.test(prev) ? 140 : 26;
+    const wait = isPause(text[shown - 1]) ? unit * PAUSE_WEIGHT : unit;
     const id = window.setTimeout(() => setShown((n) => n + 1), wait);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -341,6 +354,14 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
             : null;
   // One bubble per thought: who he is, then the introduction (which stays up while you answer).
   const lineKey = step === 'name' ? 'meet' : step === 'age' ? 'ask-age' : step;
+  // Each bubble voiced as it appears (sfx/intro, played in lib/feedback.ts); the voice stops when
+  // the next one starts, or when he's gone — skipped, or into the arena.
+  const voiced: IntroLine | null =
+    lineKey === 'hello' ? 1 : lineKey === 'meet' ? 2 : lineKey === 'ask-age' ? 3 : lineKey === 'welcome' ? 4 : null;
+  useEffect(() => {
+    if (voiced) playIntroLine(voiced);
+  }, [voiced]);
+  useEffect(() => stopIntroLine, []);
   const typing = bubble != null && (step === 'hello' || step === 'meet' || step === 'ask-age' || step === 'welcome') && !typed;
   /** An answer card is up: he steps back a little to make room for it. */
   const answering = step === 'name' || step === 'age';
@@ -388,6 +409,7 @@ function HostScene({ onFinish }: { onFinish: (from: { x: number; y: number }) =>
                   key={`${step === 'name' ? 'meet' : step === 'age' ? 'ask-age' : step}`}
                   text={bubble.text}
                   startAt={bubble.from}
+                  durationMs={voiced ? introLineMs(voiced) : null}
                   skip={skip || step === 'name' || step === 'age'}
                   onDone={() => setTyped(true)}
                 />

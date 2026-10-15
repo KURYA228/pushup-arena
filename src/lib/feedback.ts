@@ -175,6 +175,11 @@ const SAMPLES = {
   // "Камера снимает экран. Повторы не считаются." — recorded (macOS `say -v Milena`) rather than
   // spoken by speechSynthesis, which on the iPhone stayed silent when not started by a tap.
   screenAlarmVoice: 'sfx/screen-alarm-voice.m4a',
+  // Kiryukha's four lines in the intro, voiced (the originals, videos, are in art/sfx).
+  kiryukhaIntro1: 'sfx/intro/kiryukha-1.m4a',
+  kiryukhaIntro2: 'sfx/intro/kiryukha-2.m4a',
+  kiryukhaIntro3: 'sfx/intro/kiryukha-3.m4a',
+  kiryukhaIntro4: 'sfx/intro/kiryukha-4.m4a',
   // Lines a boss says as he walks out, one file each under sfx/lines/.
   lineKrabs: 'sfx/lines/krabs.m4a',
   lineEnder: 'sfx/lines/ender.m4a',
@@ -995,6 +1000,63 @@ function sayRussian(text: string, then?: () => void) {
     // No voice — the pips and the banner on screen still say it.
     window.setTimeout(finish, 600);
   }
+}
+
+/* ------------------------------ intro voice ------------------------------ */
+
+export type IntroLine = 1 | 2 | 3 | 4;
+const introSample = (n: IntroLine) => `kiryukhaIntro${n}` as SampleName;
+
+let introSource: AudioBufferSourceNode | null = null;
+/** Bumped on every start and stop, so a line still waiting for its file can tell it's too late. */
+let introToken = 0;
+
+/** Cuts off whatever intro line is playing — the next one is starting, or the intro is over. */
+export function stopIntroLine() {
+  introToken += 1;
+  try {
+    introSource?.stop();
+  } catch {
+    // Already finished.
+  }
+  introSource = null;
+}
+
+/**
+ * Kiryukha says one of his intro lines. The files start loading on the tap that opened the intro
+ * (`installAudioUnlock`), so the first line may need a moment: it waits up to a couple of
+ * seconds for its file, then gives up rather than start out of step with the bubble.
+ */
+export function playIntroLine(n: IntroLine) {
+  stopIntroLine();
+  if (!loadFeedbackPrefs().sound) return;
+  const c = audioContext();
+  if (!c) return;
+  const name = introSample(n);
+  loadSample(c, name);
+  const token = introToken;
+  const since = performance.now();
+  const attempt = () => {
+    if (token !== introToken) return;
+    const buffer = loaded.get(name);
+    if (buffer) {
+      const src = c.createBufferSource();
+      src.buffer = buffer;
+      src.connect(output(c));
+      src.start();
+      introSource = src;
+      return;
+    }
+    if (failed.has(name) || performance.now() - since > 2500) return;
+    window.setTimeout(attempt, 100);
+  };
+  attempt();
+}
+
+/** How long a line runs, once its file is in — the bubble types at that pace. */
+export function introLineMs(n: IntroLine): number | null {
+  const buffer = loaded.get(introSample(n));
+  return buffer ? buffer.duration * 1000 : null;
 }
 
 export function playLevelUp(prefs: FeedbackPrefs) {
