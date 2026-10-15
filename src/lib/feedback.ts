@@ -923,6 +923,50 @@ export function playBossDefeat(prefs: FeedbackPrefs) {
   buzz(prefs, [60, 60, 60, 60, 160]);
 }
 
+/**
+ * A command from the anti-cheat check (lib/liveness.ts), said out loud: the player is face down
+ * over the floor and won't see the screen. Two sharp pips to get attention, then the words in a
+ * Russian voice — the announcer's English one would mangle them.
+ */
+export function playChallenge(prefs: FeedbackPrefs, text: string) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      tone(c, 1046, 0, 0.09, 0.26);
+      tone(c, 1046, 0.14, 0.09, 0.26);
+    }
+    sayRussian(text);
+  }
+  buzz(prefs, [80, 60, 80]);
+}
+
+/** The command was done: a quick rising pair, and counting goes on. */
+export function playChallengePassed(prefs: FeedbackPrefs) {
+  if (prefs.sound) {
+    const c = audioContext();
+    if (c) {
+      tone(c, 660, 0, 0.08);
+      tone(c, 990, 0.07, 0.14);
+    }
+  }
+  buzz(prefs, 40);
+}
+
+function sayRussian(text: string) {
+  if (!speechSupported()) return;
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ru-RU';
+    const voice = window.speechSynthesis.getVoices().find((v) => /^ru/i.test(v.lang));
+    if (voice) u.voice = voice;
+    u.rate = 1.05;
+    window.speechSynthesis.speak(u);
+  } catch {
+    // No voice — the pips and the banner on screen still say it.
+  }
+}
+
 export function playLevelUp(prefs: FeedbackPrefs) {
   if (prefs.sound) {
     const c = audioContext();

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { usePoseDetection, type ModelQuality } from '../hooks/usePoseDetection';
 import { cameraLooksHeadOn, type Strictness } from '../lib/repDetector';
+import { CHALLENGE_TEXT } from '../lib/liveness';
 import type { Feedback } from '../hooks/useFeedback';
 import { bumpClicker } from '../hooks/useProfile';
 import { usePlusCountsReps } from '../lib/devFlags';
@@ -152,6 +153,24 @@ export function CameraPanel({
     else stop();
   }, [mode, start, stop]);
 
+  // The anti-cheat command (lib/liveness.ts): said out loud once when it's given, and a short
+  // cue once it's done. Keyed by ids so a re-render never says it twice.
+  const live = pose.liveness;
+  const saidRef = useRef({ challenge: live.challengeId, passed: live.passedId });
+  const { challenge: sayChallenge, challengePassed } = feedback;
+  useEffect(() => {
+    const said = saidRef.current;
+    if (live.challengeId !== said.challenge) {
+      said.challenge = live.challengeId;
+      if (live.kind && mode === 'camera') sayChallenge(CHALLENGE_TEXT[live.kind]);
+    }
+    if (live.passedId !== said.passed) {
+      said.passed = live.passedId;
+      if (mode === 'camera') challengePassed();
+    }
+  }, [live.challengeId, live.passedId, live.kind, mode, sayChallenge, challengePassed]);
+  const checking = mode === 'camera' && pose.status === 'tracking' && live.state !== 'counting';
+
   const isBusy = pose.status === 'requesting-permission' || pose.status === 'loading-model';
   /** Someone in view, in a push-up position — the understudy copies them; otherwise he sleeps. */
   const following = pose.status === 'tracking' && pose.quality === 'ok' && pose.snapshot.posture === 'ok';
@@ -160,7 +179,9 @@ export function CameraPanel({
   // One line telling the user why reps aren't registering — the previous version showed nothing,
   // so a hidden arm and a wrong threshold looked identical from the outside.
   let hint: { text: string; tone: 'warn' | 'info' } | null = null;
-  if (pose.status === 'tracking') {
+  if (pose.status === 'tracking' && live.state !== 'counting') {
+    hint = { text: 'Проверка: выполни команду сверху — до этого повторы не считаются', tone: 'warn' };
+  } else if (pose.status === 'tracking') {
     if (pose.quality === 'no-pose') hint = { text: 'Не вижу тебя — попади целиком в кадр', tone: 'warn' };
     else if (pose.quality === 'arm-hidden') hint = { text: 'Не видно рук — разверни камеру вбок', tone: 'warn' };
     // Posture first: if it isn't a push-up position, nothing else on this list matters.
@@ -180,6 +201,39 @@ export function CameraPanel({
 
   return (
     <div className="w-full">
+      {/* The command, over everything at the top of the screen: big enough to read from the floor. */}
+      {checking && (
+        <div className="safe-top pointer-events-none fixed inset-x-0 top-0 z-50 flex justify-center px-3 pt-2">
+          <div
+            className={clsx(
+              'w-full max-w-md rounded-2xl border-2 px-4 py-3 text-center shadow-2xl',
+              live.state === 'blocked' ? 'border-arena-red bg-arena-bg/95' : 'border-arena-amber bg-arena-bg/95',
+            )}
+          >
+            {live.state === 'blocked' ? (
+              <>
+                <p className="text-lg font-black uppercase text-arena-red">Не успел</p>
+                <p className="mt-0.5 text-xs text-arena-text-dim">Повторы не считаются — сейчас будет новая команда</p>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-arena-text-dim">Проверка, что это ты</p>
+                <p className="mt-0.5 text-2xl font-black uppercase text-arena-amber">
+                  {live.kind ? CHALLENGE_TEXT[live.kind] : ''}
+                </p>
+                <p className="mt-0.5 text-xs text-arena-text-dim">
+                  {live.kind === 'hold-top' ? 'Руки прямые, не двигайся 2 секунды' : 'Оторви руку от пола и вытяни вперёд'} ·{' '}
+                  <span className="tabular-nums text-arena-text">{live.secondsLeft} с</span>
+                </p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-arena-surface-2">
+                  <div className="h-full rounded-full bg-arena-amber transition-[width] duration-100" style={{ width: `${live.progress * 100}%` }} />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="mb-3 flex justify-center gap-2">
         <button
           onClick={() => setMode('manual')}

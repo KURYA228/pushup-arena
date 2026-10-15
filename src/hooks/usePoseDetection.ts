@@ -14,6 +14,7 @@ import {
   type Strictness,
 } from '../lib/repDetector';
 import { openCamera, startVideo } from '../lib/camera';
+import { Liveness, type LivenessArm, type LivenessFrame, type LivenessSnapshot } from '../lib/liveness';
 
 // Loaded lazily on first camera use so the ~1.5MB MediaPipe JS never ships in the main bundle
 // for people who only use manual counting.
@@ -265,6 +266,97 @@ function extractSample(world: Landmark[], screen: NormalizedLandmark[], aspect: 
 }
 
 /**
+ * The anti-cheat check (lib/liveness.ts) — one per page, not per mount, so switching to manual
+ * and back or leaving the fight doesn't wipe a pending command.
+ */
+const liveness = new Liveness();
+
+/** Every arm whose three joints are confidently visible, for the liveness commands. */
+function livenessFrame(screen: NormalizedLandmark[], sample: PoseSample | null, aspect: number): LivenessFrame {
+  const pt = (i: number) => ({ x: screen[i].x * aspect, y: screen[i].y });
+  const arms: LivenessArm[] = ARMS.filter(
+    (a) =>
+      visibility(screen[a.shoulder]) >= MIN_VISIBILITY &&
+      visibility(screen[a.elbow]) >= MIN_VISIBILITY &&
+      visibility(screen[a.wrist]) >= MIN_VISIBILITY,
+  ).map((a) => ({ shoulder: pt(a.shoulder), elbow: pt(a.elbow), wrist: pt(a.wrist) }));
+  const scale =
+    sample?.scale ??
+    (arms[0] ? Math.hypot(arms[0].shoulder.x - arms[0].elbow.x, arms[0].shoulder.y - arms[0].elbow.y) * 2 : 0.3);
+  return { angle: sample?.angle ?? null, arms, scale };
+}
+
+/** How often the screen hints are looked at, and how many looks in a row make it suspicious. */
+const HINT_EVERY_MS = 500;
+const HINT_STREAK = 6;
+const HINT_W = 48;
+const HINT_H = 36;
+
+/**
+ * Two cheap tells that the camera is looking at a screen rather than a room. Neither is proof —
+ * a far-off player or a bright window does the same — so all they do is bring the next command
+ * closer (Liveness.markSuspicious), never block a rep.
+ *  - `small`: the whole body fits in under a third of the frame either way. Doing push-ups that
+ *    far from the phone is rare; a phone or a laptop held up in front of the camera is exactly it.
+ *  - `glowing`: the area around the body is much brighter than the edges of the frame, which are
+ *    dark — an emissive rectangle in a dim room.
+ */
+function screenHints(
+  screen: NormalizedLandmark[],
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+): { small: boolean; glowing: boolean } {
+  const seen = screen.filter((l) => visibility(l) >= MIN_VISIBILITY);
+  if (seen.length < 6) return { small: false, glowing: false };
+  const xs = seen.map((l) => l.x);
+  const ys = seen.map((l) => l.y);
+  const x0 = Math.max(0, Math.min(...xs));
+  const x1 = Math.min(1, Math.max(...xs));
+  const y0 = Math.max(0, Math.min(...ys));
+  const y1 = Math.min(1, Math.max(...ys));
+  const small = x1 - x0 < 0.33 && y1 - y0 < 0.33;
+
+  let glowing = false;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (ctx) {
+    canvas.width = HINT_W;
+    canvas.height = HINT_H;
+    ctx.drawImage(video, 0, 0, HINT_W, HINT_H);
+    const px = ctx.getImageData(0, 0, HINT_W, HINT_H).data;
+    // The body box, grown by a third each way — where a screen showing that body would be.
+    const padX = (x1 - x0) * 0.33;
+    const padY = (y1 - y0) * 0.33;
+    const bx0 = (x0 - padX) * HINT_W;
+    const bx1 = (x1 + padX) * HINT_W;
+    const by0 = (y0 - padY) * HINT_H;
+    const by1 = (y1 + padY) * HINT_H;
+    let inner = 0;
+    let innerN = 0;
+    let edge = 0;
+    let edgeN = 0;
+    for (let y = 0; y < HINT_H; y++) {
+      for (let x = 0; x < HINT_W; x++) {
+        const i = (y * HINT_W + x) * 4;
+        const luma = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        if (x >= bx0 && x <= bx1 && y >= by0 && y <= by1) {
+          inner += luma;
+          innerN++;
+        } else if (x < HINT_W * 0.12 || x >= HINT_W * 0.88 || y < HINT_H * 0.12 || y >= HINT_H * 0.88) {
+          edge += luma;
+          edgeN++;
+        }
+      }
+    }
+    if (innerN && edgeN) {
+      const innerMean = inner / innerN;
+      const edgeMean = edge / edgeN;
+      glowing = edgeMean < 50 && innerMean > 2.2 * Math.max(edgeMean, 1);
+    }
+  }
+  return { small, glowing };
+}
+
+/**
  * Camera-based rep counter. Tracks body keypoints with MediaPipe Pose and hands the elbow angle to
  * {@link RepDetector}, which learns your personal range of motion instead of assuming fixed
  * thresholds. Angles come from `worldLandmarks` (metric 3D) rather than the normalized 2D
@@ -318,6 +410,10 @@ export function usePoseDetection(onRep: () => void) {
   /** When tracking last began, and how many seconds in a row the frame rate has been too low. */
   const trackingSinceRef = useRef(0);
   const lowFpsRef = useRef(0);
+
+  const [livenessSnap, setLivenessSnap] = useState<LivenessSnapshot>(() => liveness.snapshot(performance.now()));
+  const hintCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hintRef = useRef({ at: 0, small: 0, glowing: 0 });
 
   /** Until when the skeleton flashes bright green: the moment a rep has just counted. */
   const flashUntilRef = useRef(0);
@@ -459,22 +555,42 @@ export function usePoseDetection(onRep: () => void) {
           const screen = result.landmarks[0];
           const world = result.worldLandmarks[0];
           const detector = detectorRef.current!;
+          const frameAspect = v.videoWidth / Math.max(1, v.videoHeight);
           if (!screen || !world) {
             detector.markPoseLost();
             setQuality('no-pose');
+            liveness.push(null, now);
           } else {
-            const sample = extractSample(world, screen, v.videoWidth / Math.max(1, v.videoHeight));
+            const sample = extractSample(world, screen, frameAspect);
             if (sample == null) {
               detector.markPoseLost();
               setQuality('arm-hidden');
             } else {
               setQuality('ok');
-              if (detector.push(sample, now)) {
+              // A rep counts only while no command is pending (lib/liveness.ts).
+              if (detector.push(sample, now) && liveness.rep(now)) {
                 flashUntilRef.current = now + 350;
                 onRepRef.current();
               }
             }
+            liveness.push(livenessFrame(screen, sample, frameAspect), now);
+
+            // Now and then, the screen tells (see screenHints).
+            const h = hintRef.current;
+            if (now - h.at >= HINT_EVERY_MS && !liveness.snapshot(now).suspicious) {
+              h.at = now;
+              hintCanvasRef.current ??= document.createElement('canvas');
+              try {
+                const { small, glowing } = screenHints(screen, v, hintCanvasRef.current);
+                h.small = small ? h.small + 1 : 0;
+                h.glowing = glowing ? h.glowing + 1 : 0;
+                if (h.small >= HINT_STREAK || h.glowing >= HINT_STREAK) liveness.markSuspicious();
+              } catch {
+                // A frame the canvas couldn't read — try again on the next look.
+              }
+            }
           }
+          setLivenessSnap(liveness.snapshot(now));
           const snap = detector.snapshot();
           // Drawn after the detector has seen the frame, so the colour says where this rep stands now.
           drawSkeleton(screen, vis, snap.phase === 'down', now);
@@ -655,6 +771,8 @@ export function usePoseDetection(onRep: () => void) {
     fps,
     aspect,
     snapshot,
+    /** The anti-cheat command, if one is pending (lib/liveness.ts). */
+    liveness: livenessSnap,
     notice,
     dismissNotice: () => setNotice(null),
     mirrored: prefs.facing === 'user',
