@@ -121,7 +121,7 @@ export function useFeedback() {
       prefs,
       setSound: (on: boolean) => update({ sound: on }),
       setVibration: (on: boolean) => update({ vibration: on }),
-      setLoud: (on: boolean) => update({ loud: on }),
+      setLoud: (on: boolean) => update({ loud: on, loudChosen: true }),
       canVibrate: vibrationSupported(),
       canBeLoud: audioSessionSupported(),
       /** `sound` lets a stage ask for its own rep cue; left out, the ordinary beep plays. */

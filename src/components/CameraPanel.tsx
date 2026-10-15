@@ -460,7 +460,7 @@ export function CameraPanel({
                   onChange={feedback.setLoud}
                   note={
                     feedback.canBeLoud
-                      ? 'может ставить на паузу музыку из других приложений'
+                      ? 'выключи, если ставит на паузу твою музыку'
                       : 'не поддерживается этим браузером (нужен iOS 16.4+)'
                   }
                 />

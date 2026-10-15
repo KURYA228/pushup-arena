@@ -22,11 +22,16 @@ import { LAND_SEC } from './bossCut';
 export interface FeedbackPrefs {
   sound: boolean;
   vibration: boolean;
-  /** Play through the iPhone's silent switch. Off by default: it can pause the player's music. */
+  /**
+   * Play through the iPhone's silent switch. On by default — a counter nobody hears is the worse
+   * failure — and switchable off in the fight settings, for whoever finds it pausing their music.
+   */
   loud: boolean;
+  /** The player has set `loud` themselves; until then it follows the default. */
+  loudChosen?: boolean;
 }
 
-export const DEFAULT_FEEDBACK: FeedbackPrefs = { sound: true, vibration: true, loud: false };
+export const DEFAULT_FEEDBACK: FeedbackPrefs = { sound: true, vibration: true, loud: true };
 
 type AudioSessionNavigator = Navigator & { audioSession?: { type: string } };
 
@@ -41,7 +46,7 @@ export function audioSessionSupported(): boolean {
  * By default iOS treats WebAudio like a ringtone ("auto" ≈ ambient), so on silent the gym goes
  * quiet. Declaring the page's sound as "playback" — the category of a video or a music app — makes
  * it play regardless of the switch. The price is that playback audio may pause or duck what's
- * playing in another app, which is why it's the player's choice and not the default.
+ * playing in another app — on by default all the same, and switchable off in the fight settings.
  */
 export function applyAudioSession(prefs: FeedbackPrefs) {
   const session = (navigator as AudioSessionNavigator).audioSession;
@@ -59,7 +64,10 @@ export function loadFeedbackPrefs(): FeedbackPrefs {
   try {
     const raw = localStorage.getItem(PREF_KEY);
     if (!raw) return DEFAULT_FEEDBACK;
-    return { ...DEFAULT_FEEDBACK, ...(JSON.parse(raw) as Partial<FeedbackPrefs>) };
+    const saved = JSON.parse(raw) as Partial<FeedbackPrefs>;
+    // Saved before `loud` defaulted to on, the file says off without anyone having chosen it.
+    if (!saved.loudChosen) delete saved.loud;
+    return { ...DEFAULT_FEEDBACK, ...saved };
   } catch {
     return DEFAULT_FEEDBACK;
   }
