@@ -77,6 +77,22 @@ test('a recording that keeps doing push-ups fails the command and stays blocked'
   assert.equal(s.passedId, 0);
   assert.ok(s.challengeId >= 2, 'a fresh command follows a failed one');
   assert.equal(l.rep(t + 1), false);
+  assert.equal(s.failedId >= 1, true);
+  assert.equal(s.revoked, DEFAULT_LIVENESS.firstAfter[0], 'every rep before the failed command is taken back');
+});
+
+test('a passed command confirms the reps before it: a later failure takes back only the newer ones', () => {
+  const l = liveness();
+  let t = repUntilChallenge(l);
+  for (let i = 0; i < 20; i++) l.push(frame(RAISED, 160), (t += DT));
+  let reps = 0;
+  while (l.snapshot(t).state === 'counting') {
+    l.rep((t += 1000));
+    reps++;
+  }
+  const end = t + 8000;
+  while (t < end) l.push(null, (t += DT));
+  assert.equal(l.snapshot(t).revoked, reps);
 });
 
 test('freeze at the top: holding still passes, push-ups through it do not', () => {

@@ -8,9 +8,9 @@
  * top") and gives a few seconds to do it. A live player does it without thinking; a video just
  * keeps going.
  *
- * Until the command is done, reps don't count. Failing it doesn't take back reps already landed —
- * they've hit the boss by then — but nothing more counts until a fresh command is passed, so a
- * video gets a handful of reps at most and then stalls.
+ * Until the command is done, reps don't count. Failing it takes back every rep since the last
+ * command passed (`revoked`, undone by the screen through the same path as «−1»), and nothing
+ * more counts until a fresh command is passed — so a video nets nothing at all.
  *
  * Indirect hints that the picture is a screen (see `screenHints` in usePoseDetection) only make
  * the commands come sooner and more often. They never block anything on their own: they misfire
@@ -60,6 +60,10 @@ export interface LivenessSnapshot {
   challengeId: number;
   /** Bumped on every passed command, for a "done" cue. */
   passedId: number;
+  /** Bumped on every failed command; `revoked` reps are to be taken back, once per bump. */
+  failedId: number;
+  /** How many counted reps the last failed command takes back. */
+  revoked: number;
   /** The picture looked like a screen at some point this session. */
   suspicious: boolean;
 }
@@ -148,6 +152,10 @@ export class Liveness {
   private lastKind: ChallengeKind | null = null;
   private challengeId = 0;
   private passedId = 0;
+  private failedId = 0;
+  /** Reps counted since the last passed command — what a failed one takes back. */
+  private unconfirmed = 0;
+  private revoked = 0;
   private progress = 0;
 
   private raisedSince: number | null = null;
@@ -169,6 +177,7 @@ export class Liveness {
     this.kind = null;
     this.first = true;
     this.suspicious = false;
+    this.unconfirmed = 0;
     this.progress = 0;
     this.raisedSince = null;
     this.hold = [];
@@ -187,11 +196,20 @@ export class Liveness {
   }
 
   /**
+   * The picture looks strongly like a screen: ask for a command now instead of waiting for the
+   * rep that would bring it. Nothing happens if one is already pending.
+   */
+  challengeNow(now: number) {
+    if (this.state === 'counting') this.start(now);
+  }
+
+  /**
    * The detector counted a rep. Returns whether it counts; may start a command, which then holds
    * every rep after it until it's done.
    */
   rep(now: number): boolean {
     if (this.state !== 'counting') return false;
+    this.unconfirmed += 1;
     this.repsUntilNext -= 1;
     if (this.repsUntilNext <= 0) this.start(now);
     return true;
@@ -234,6 +252,9 @@ export class Liveness {
       this.kind = null;
       this.progress = 0;
       this.blockedUntil = now + this.tuning.retryPauseMs;
+      this.revoked = this.unconfirmed;
+      this.unconfirmed = 0;
+      this.failedId += 1;
     }
   }
 
@@ -277,6 +298,7 @@ export class Liveness {
     this.progress = 0;
     this.first = false;
     this.passedId += 1;
+    this.unconfirmed = 0;
     this.repsUntilNext = this.draw(this.suspicious ? this.tuning.everySuspicious : this.tuning.every);
   }
 
@@ -288,6 +310,8 @@ export class Liveness {
       progress: this.progress,
       challengeId: this.challengeId,
       passedId: this.passedId,
+      failedId: this.failedId,
+      revoked: this.revoked,
       suspicious: this.suspicious,
     };
   }

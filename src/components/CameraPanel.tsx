@@ -16,12 +16,15 @@ import {
   SwitchCamera,
   Vibrate,
   BellOff,
+  Gauge,
   Volume2,
   VolumeX,
 } from 'lucide-react';
 import { usePoseDetection, type ModelQuality } from '../hooks/usePoseDetection';
 import { cameraLooksHeadOn, type Strictness } from '../lib/repDetector';
 import { CHALLENGE_TEXT } from '../lib/liveness';
+import { SCREEN_THRESHOLDS, type ScreenReadings, type TellName } from '../lib/screenTells';
+import type { ScreenCheck } from '../hooks/usePoseDetection';
 import type { Feedback } from '../hooks/useFeedback';
 import { bumpClicker } from '../hooks/useProfile';
 import { usePlusCountsReps } from '../lib/devFlags';
@@ -31,6 +34,7 @@ import { db, PROFILE_ID } from '../db/db';
 type Mode = 'manual' | 'camera';
 
 const MODE_KEY = 'arena.counterMode';
+const METER_KEY = 'arena.screenMeter';
 
 /** What the understudy says on a counted rep — one per rep, round and round. */
 const QUIPS = ['уф!', 'ещё!', 'красава', 'босс плачет', 'мощь', 'не сдавайся', 'легенда', 'пол дрожит', 'ага!', 'жми!'];
@@ -88,7 +92,8 @@ export function CameraPanel({
   disabled,
 }: {
   onRep: () => void;
-  onUndo: () => void;
+  /** Takes back the last counted rep — «−1», and a failed anti-cheat command, rep by rep. */
+  onUndo: () => void | Promise<void>;
   /** Greys out the minus button when the undo stack is empty, instead of it doing nothing. */
   canUndo: boolean;
   feedback: Feedback;
@@ -106,6 +111,22 @@ export function CameraPanel({
     }
   };
   const [showSettings, setShowSettings] = useState(false);
+  /** The screen-tell numbers on screen, for setting the thresholds from real runs. */
+  const [meter, setMeterState] = useState(() => {
+    try {
+      return localStorage.getItem(METER_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setMeter = (on: boolean) => {
+    setMeterState(on);
+    try {
+      localStorage.setItem(METER_KEY, on ? '1' : '0');
+    } catch {
+      // Not remembered — harmless.
+    }
+  };
   /** The camera thumbnail blown up to full width — for setting the phone down, not for the set. */
   const [bigPreview, setBigPreview] = useState(false);
   /** Dev switch: «+» lands a real rep instead of a clicker tap. */
@@ -114,9 +135,17 @@ export function CameraPanel({
   const [sessionTaps, setSessionTaps] = useState(0);
   const clickerTotal = useLiveQuery(() => db.profile.get(PROFILE_ID).then((p) => p?.clickerTaps ?? 0), []) ?? 0;
 
+  /**
+   * Camera reps actually handed to the game since the last anti-cheat command was passed — the
+   * most a failed one may take back. The detector can count a rep the game then ignores (the
+   * fight is locked for a scene), and undoing for that one would take an honest rep instead.
+   */
+  const unconfirmedRef = useRef(0);
+
   // Only the camera counts reps. The game — damage, XP, streak, the total — moves on nothing else.
   const pose = usePoseDetection(() => {
     if (disabled) return;
+    unconfirmedRef.current += 1;
     onRep();
   });
 
@@ -144,7 +173,10 @@ export function CameraPanel({
     if (undoesClicks) {
       void bumpClicker(-1);
       setSessionTaps((n) => n - 1);
-    } else onUndo();
+    } else {
+      unconfirmedRef.current = Math.max(0, unconfirmedRef.current - 1);
+      void onUndo();
+    }
   };
 
   const { start, stop } = pose;
@@ -156,7 +188,22 @@ export function CameraPanel({
   // The anti-cheat command (lib/liveness.ts): said out loud once when it's given, and a short
   // cue once it's done. Keyed by ids so a re-render never says it twice.
   const live = pose.liveness;
-  const saidRef = useRef({ challenge: live.challengeId, passed: live.passedId });
+  const saidRef = useRef({ challenge: live.challengeId, passed: live.passedId, failed: live.failedId });
+  const undoRef = useRef(onUndo);
+  undoRef.current = onUndo;
+  // A failed command takes back every rep since the last one passed — the same undo as «−1», so
+  // damage, XP and the day's count all go back with it.
+  useEffect(() => {
+    const said = saidRef.current;
+    if (live.failedId === said.failed) return;
+    said.failed = live.failedId;
+    const n = Math.min(live.revoked, unconfirmedRef.current);
+    unconfirmedRef.current = 0;
+    if (n <= 0) return;
+    void (async () => {
+      for (let i = 0; i < n; i++) await undoRef.current();
+    })();
+  }, [live.failedId, live.revoked]);
   const { challenge: sayChallenge, challengePassed } = feedback;
   useEffect(() => {
     const said = saidRef.current;
@@ -166,6 +213,7 @@ export function CameraPanel({
     }
     if (live.passedId !== said.passed) {
       said.passed = live.passedId;
+      unconfirmedRef.current = 0;
       if (mode === 'camera') challengePassed();
     }
   }, [live.challengeId, live.passedId, live.kind, mode, sayChallenge, challengePassed]);
@@ -213,7 +261,11 @@ export function CameraPanel({
             {live.state === 'blocked' ? (
               <>
                 <p className="text-lg font-black uppercase text-arena-red">Не успел</p>
-                <p className="mt-0.5 text-xs text-arena-text-dim">Повторы не считаются — сейчас будет новая команда</p>
+                <p className="mt-0.5 text-xs text-arena-text-dim">
+                  {live.revoked > 0
+                    ? `Отменено повторов: ${live.revoked}. Сейчас будет новая команда`
+                    : 'Повторы не считаются — сейчас будет новая команда'}
+                </p>
               </>
             ) : (
               <>
@@ -493,10 +545,19 @@ export function CameraPanel({
                 </p>
                 <Segmented value={pose.model} options={MODEL_LABELS} onChange={pose.setModel} />
               </div>
+              <Toggle
+                icon={<Gauge size={14} />}
+                label="Замеры детектора экрана"
+                checked={meter}
+                onChange={setMeter}
+                note="для настройки защиты от видео"
+              />
             </>
           )}
         </div>
       )}
+
+      {mode === 'camera' && meter && pose.status === 'tracking' && <ScreenMeter check={pose.screenCheck} />}
 
       {/* The −/+ row is manual mode only. With the camera on there's no "+": the camera is the
           count, and a button beside it only invites tapping instead of pushing. Its «−1» moves
@@ -533,6 +594,58 @@ export function CameraPanel({
         {sessionTaps > 0 && <span className="tabular-nums"> (+{sessionTaps})</span>} · в зачёт идут
         только отжимания с камеры
       </p>
+      )}
+    </div>
+  );
+}
+
+const TELL_ROWS: { tell: TellName; label: string; value: (r: ScreenReadings) => string; limit: string }[] = [
+  {
+    tell: 'glow',
+    label: 'Свечение',
+    value: (r) => `${r.glow.toFixed(2)} · края ${Math.round(r.edgeLuma)}`,
+    limit: `≥${SCREEN_THRESHOLDS.glow} и края ≤${SCREEN_THRESHOLDS.maxEdgeLuma}`,
+  },
+  { tell: 'border', label: 'Рамка', value: (r) => r.border.toFixed(2), limit: `≥${SCREEN_THRESHOLDS.border}` },
+  { tell: 'bands', label: 'Полосы', value: (r) => r.bands.toFixed(2), limit: `≥${SCREEN_THRESHOLDS.bands}` },
+  { tell: 'moire', label: 'Муар', value: (r) => r.moire.toFixed(2), limit: `≥${SCREEN_THRESHOLDS.moire}` },
+  { tell: 'glare', label: 'Блики', value: (r) => r.glare.toFixed(2), limit: `≥${SCREEN_THRESHOLDS.glare}` },
+  { tell: 'small', label: 'Размер тела', value: (r) => r.size.toFixed(2), limit: `≤${SCREEN_THRESHOLDS.maxSize}` },
+];
+
+/**
+ * The screen-tell readings, live. For two runs side by side — yourself, then a video of
+ * push-ups on another screen — so the thresholds in lib/screenTells.ts can be set from what a
+ * real phone actually sees.
+ */
+function ScreenMeter({ check }: { check: ScreenCheck }) {
+  const r = check.readings;
+  return (
+    <div className="mb-3 rounded-xl border border-arena-border bg-arena-surface p-3 text-[11px]">
+      <p className="mb-1.5 flex items-center justify-between text-arena-text-dim">
+        <span>Замеры детектора экрана</span>
+        <span className={clsx('font-semibold', check.tells.length >= 3 ? 'text-arena-red' : check.tells.length >= 2 ? 'text-arena-amber' : 'text-arena-text')}>
+          признаков: {check.tells.length}
+        </span>
+      </p>
+      {!r ? (
+        <p className="text-arena-text-dim">Жду, когда ты появишься в кадре…</p>
+      ) : (
+        <div className="space-y-0.5 tabular-nums">
+          {TELL_ROWS.map((row) => {
+            const on = check.tells.includes(row.tell);
+            return (
+              <div key={row.tell} className="flex items-baseline gap-2">
+                <span className={clsx('w-24 shrink-0', on ? 'font-semibold text-arena-red' : 'text-arena-text')}>
+                  {on ? '● ' : ''}
+                  {row.label}
+                </span>
+                <span className={clsx('flex-1', on ? 'text-arena-red' : 'text-arena-text')}>{row.value(r)}</span>
+                <span className="text-[10px] text-arena-text-dim">{row.limit}</span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

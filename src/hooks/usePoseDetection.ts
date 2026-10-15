@@ -15,6 +15,7 @@ import {
 } from '../lib/repDetector';
 import { openCamera, startVideo } from '../lib/camera';
 import { Liveness, type LivenessArm, type LivenessFrame, type LivenessSnapshot } from '../lib/liveness';
+import { ScreenTells, tellsShowing, type BodyBox, type ScreenReadings, type TellName } from '../lib/screenTells';
 
 // Loaded lazily on first camera use so the ~1.5MB MediaPipe JS never ships in the main bundle
 // for people who only use manual counting.
@@ -286,74 +287,42 @@ function livenessFrame(screen: NormalizedLandmark[], sample: PoseSample | null, 
   return { angle: sample?.angle ?? null, arms, scale };
 }
 
-/** How often the screen hints are looked at, and how many looks in a row make it suspicious. */
-const HINT_EVERY_MS = 500;
-const HINT_STREAK = 6;
-const HINT_W = 48;
-const HINT_H = 36;
+/** How often the frame is checked for screen tells (lib/screenTells.ts). */
+const TELLS_EVERY_MS = 500;
+/** This many looks in a row with ≥2 tells: commands come more often. */
+const TELLS_STREAK = 6;
+/** This many looks in a row with ≥3 tells: a command right now. */
+const TELLS_ALARM_STREAK = 4;
+const TELLS_W = 96;
+const TELLS_H = 72;
 
-/**
- * Two cheap tells that the camera is looking at a screen rather than a room. Neither is proof —
- * a far-off player or a bright window does the same — so all they do is bring the next command
- * closer (Liveness.markSuspicious), never block a rep.
- *  - `small`: the whole body fits in under a third of the frame either way. Doing push-ups that
- *    far from the phone is rare; a phone or a laptop held up in front of the camera is exactly it.
- *  - `glowing`: the area around the body is much brighter than the edges of the frame, which are
- *    dark — an emissive rectangle in a dim room.
- */
-function screenHints(
-  screen: NormalizedLandmark[],
-  video: HTMLVideoElement,
-  canvas: HTMLCanvasElement,
-): { small: boolean; glowing: boolean } {
+/** The box around the confidently seen landmarks, or null with too few to say. */
+function bodyBox(screen: NormalizedLandmark[]): BodyBox | null {
   const seen = screen.filter((l) => visibility(l) >= MIN_VISIBILITY);
-  if (seen.length < 6) return { small: false, glowing: false };
+  if (seen.length < 6) return null;
   const xs = seen.map((l) => l.x);
   const ys = seen.map((l) => l.y);
-  const x0 = Math.max(0, Math.min(...xs));
-  const x1 = Math.min(1, Math.max(...xs));
-  const y0 = Math.max(0, Math.min(...ys));
-  const y1 = Math.min(1, Math.max(...ys));
-  const small = x1 - x0 < 0.33 && y1 - y0 < 0.33;
+  return {
+    x0: Math.max(0, Math.min(...xs)),
+    x1: Math.min(1, Math.max(...xs)),
+    y0: Math.max(0, Math.min(...ys)),
+    y1: Math.min(1, Math.max(...ys)),
+  };
+}
 
-  let glowing = false;
+/** The current video frame, shrunk to a few dozen pixels a side. */
+function smallFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement): Uint8ClampedArray | null {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (ctx) {
-    canvas.width = HINT_W;
-    canvas.height = HINT_H;
-    ctx.drawImage(video, 0, 0, HINT_W, HINT_H);
-    const px = ctx.getImageData(0, 0, HINT_W, HINT_H).data;
-    // The body box, grown by a third each way — where a screen showing that body would be.
-    const padX = (x1 - x0) * 0.33;
-    const padY = (y1 - y0) * 0.33;
-    const bx0 = (x0 - padX) * HINT_W;
-    const bx1 = (x1 + padX) * HINT_W;
-    const by0 = (y0 - padY) * HINT_H;
-    const by1 = (y1 + padY) * HINT_H;
-    let inner = 0;
-    let innerN = 0;
-    let edge = 0;
-    let edgeN = 0;
-    for (let y = 0; y < HINT_H; y++) {
-      for (let x = 0; x < HINT_W; x++) {
-        const i = (y * HINT_W + x) * 4;
-        const luma = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
-        if (x >= bx0 && x <= bx1 && y >= by0 && y <= by1) {
-          inner += luma;
-          innerN++;
-        } else if (x < HINT_W * 0.12 || x >= HINT_W * 0.88 || y < HINT_H * 0.12 || y >= HINT_H * 0.88) {
-          edge += luma;
-          edgeN++;
-        }
-      }
-    }
-    if (innerN && edgeN) {
-      const innerMean = inner / innerN;
-      const edgeMean = edge / edgeN;
-      glowing = edgeMean < 50 && innerMean > 2.2 * Math.max(edgeMean, 1);
-    }
-  }
-  return { small, glowing };
+  if (!ctx) return null;
+  if (canvas.width !== TELLS_W) canvas.width = TELLS_W;
+  if (canvas.height !== TELLS_H) canvas.height = TELLS_H;
+  ctx.drawImage(video, 0, 0, TELLS_W, TELLS_H);
+  return ctx.getImageData(0, 0, TELLS_W, TELLS_H).data;
+}
+
+export interface ScreenCheck {
+  readings: ScreenReadings | null;
+  tells: TellName[];
 }
 
 /**
@@ -412,8 +381,9 @@ export function usePoseDetection(onRep: () => void) {
   const lowFpsRef = useRef(0);
 
   const [livenessSnap, setLivenessSnap] = useState<LivenessSnapshot>(() => liveness.snapshot(performance.now()));
-  const hintCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const hintRef = useRef({ at: 0, small: 0, glowing: 0 });
+  const tellsCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const tellsRef = useRef({ at: 0, streak: 0, alarm: 0, tells: new ScreenTells() });
+  const [screenCheck, setScreenCheck] = useState<ScreenCheck>({ readings: null, tells: [] });
 
   /** Until when the skeleton flashes bright green: the moment a rep has just counted. */
   const flashUntilRef = useRef(0);
@@ -575,16 +545,29 @@ export function usePoseDetection(onRep: () => void) {
             }
             liveness.push(livenessFrame(screen, sample, frameAspect), now);
 
-            // Now and then, the screen tells (see screenHints).
-            const h = hintRef.current;
-            if (now - h.at >= HINT_EVERY_MS && !liveness.snapshot(now).suspicious) {
-              h.at = now;
-              hintCanvasRef.current ??= document.createElement('canvas');
+            // Twice a second, the tells that this is a screen and not a room (lib/screenTells.ts).
+            // Two of them make the commands come more often; three, a command right now — which,
+            // with the reps it takes back, is what stops a video. Never a block on their own.
+            const st = tellsRef.current;
+            const box = bodyBox(screen);
+            if (box && now - st.at >= TELLS_EVERY_MS) {
+              st.at = now;
+              tellsCanvasRef.current ??= document.createElement('canvas');
               try {
-                const { small, glowing } = screenHints(screen, v, hintCanvasRef.current);
-                h.small = small ? h.small + 1 : 0;
-                h.glowing = glowing ? h.glowing + 1 : 0;
-                if (h.small >= HINT_STREAK || h.glowing >= HINT_STREAK) liveness.markSuspicious();
+                const px = smallFrame(v, tellsCanvasRef.current);
+                if (px) {
+                  const readings = st.tells.analyze(px, TELLS_W, TELLS_H, box);
+                  const tells = tellsShowing(readings);
+                  setScreenCheck({ readings, tells });
+                  st.streak = tells.length >= 2 ? st.streak + 1 : 0;
+                  st.alarm = tells.length >= 3 ? st.alarm + 1 : 0;
+                  if (st.streak >= TELLS_STREAK) liveness.markSuspicious();
+                  if (st.alarm >= TELLS_ALARM_STREAK) {
+                    st.alarm = 0;
+                    liveness.markSuspicious();
+                    liveness.challengeNow(now);
+                  }
+                }
               } catch {
                 // A frame the canvas couldn't read — try again on the next look.
               }
@@ -773,6 +756,8 @@ export function usePoseDetection(onRep: () => void) {
     snapshot,
     /** The anti-cheat command, if one is pending (lib/liveness.ts). */
     liveness: livenessSnap,
+    /** The latest screen-tell readings, for the measurement mode. */
+    screenCheck,
     notice,
     dismissNotice: () => setNotice(null),
     mirrored: prefs.facing === 'user',
