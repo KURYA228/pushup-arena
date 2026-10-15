@@ -41,6 +41,8 @@ export interface ScreenThresholds {
   glow: number;
   maxEdgeLuma: number;
   border: number;
+  /** A border this clear is enough on its own. */
+  borderStrong: number;
   bands: number;
   moire: number;
   glare: number;
@@ -48,13 +50,17 @@ export interface ScreenThresholds {
 }
 
 /**
- * Strict on purpose (see lib/screenGuard.ts): lower than the first guesses, so a screen trips two
- * of them easily. Still starting points — set them from real runs with the dev panel's readout.
+ * Set from the first real runs (15 October 2026, a laptop webcam): a live person read border 0.52,
+ * moiré 0.71, glare 0.83 (a window behind); a phone playing a push-up video held up to the camera
+ * read border 0.84, moiré 0.59, glare 0. Only the border told them apart — the phone's edge is a
+ * hard straight line — so a clear border counts double, and moiré and glare, which fired on the
+ * live person (webcam noise, a bright window), are shown in the readout but don't count at all.
  */
 export const SCREEN_THRESHOLDS: ScreenThresholds = {
   glow: 1.8,
   maxEdgeLuma: 70,
   border: 0.5,
+  borderStrong: 0.7,
   bands: 0.4,
   moire: 0.5,
   glare: 0.5,
@@ -63,7 +69,10 @@ export const SCREEN_THRESHOLDS: ScreenThresholds = {
 
 export type TellName = 'glow' | 'border' | 'bands' | 'moire' | 'glare' | 'small';
 
-/** Which tells are showing in these readings. */
+/** Tells measured and shown, but not counted: they fired on a live person in real runs. */
+export const IGNORED_TELLS: readonly TellName[] = ['moire', 'glare'];
+
+/** Which tells are past their thresholds in these readings, counted or not. */
 export function tellsShowing(r: ScreenReadings, t: ScreenThresholds = SCREEN_THRESHOLDS): TellName[] {
   const on: TellName[] = [];
   if (r.glow >= t.glow && r.edgeLuma <= t.maxEdgeLuma) on.push('glow');
@@ -73,6 +82,16 @@ export function tellsShowing(r: ScreenReadings, t: ScreenThresholds = SCREEN_THR
   if (r.glare >= t.glare) on.push('glare');
   if (r.size > 0 && r.size <= t.maxSize) on.push('small');
   return on;
+}
+
+/**
+ * How much these readings look like a screen: a point per counted tell, two for a clear border.
+ * The guard (lib/screenGuard.ts) treats 2 as "a screen".
+ */
+export function screenScore(r: ScreenReadings, t: ScreenThresholds = SCREEN_THRESHOLDS): number {
+  return tellsShowing(r, t)
+    .filter((n) => !IGNORED_TELLS.includes(n))
+    .reduce((sum, n) => sum + (n === 'border' && r.border >= t.borderStrong ? 2 : 1), 0);
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));

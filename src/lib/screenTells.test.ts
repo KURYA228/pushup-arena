@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ScreenTells, tellsShowing, type BodyBox } from './screenTells.ts';
+import { ScreenTells, screenScore, tellsShowing, type BodyBox, type ScreenReadings } from './screenTells.ts';
 
 const W = 96;
 const H = 72;
@@ -70,6 +70,7 @@ test('a person in a lit room shows no screen tells', () => {
   t.analyze(room(1, BIG_BODY), W, H, BIG_BODY);
   const r = t.analyze(room(2, { ...BIG_BODY, x0: 0.12, x1: 0.92 }), W, H, { ...BIG_BODY, x0: 0.12, x1: 0.92 });
   assert.deepEqual(tellsShowing(r), [], JSON.stringify(r));
+  assert.equal(screenScore(r), 0);
 });
 
 test('a screen in a dim room shows several', () => {
@@ -81,4 +82,17 @@ test('a screen in a dim room shows several', () => {
   for (const tell of ['glow', 'border', 'bands', 'moire', 'glare', 'small'] as const) {
     assert.ok(on.includes(tell), `${tell} expected in ${on.join(',')} — ${JSON.stringify(r)}`);
   }
+  assert.ok(screenScore(r) >= 2);
+});
+
+// The first real runs, read off the dev panel (laptop webcam, 15 October 2026).
+const LIVE: ScreenReadings = { glow: 0.62, edgeLuma: 193, border: 0.52, bands: 0.26, moire: 0.71, glare: 0.83, size: 0.64 };
+const PHONE_VIDEO: ScreenReadings = { glow: 1.09, edgeLuma: 136, border: 0.84, bands: 0.2, moire: 0.59, glare: 0, size: 0.54 };
+
+test('real run: a live person in front of a window is not a screen', () => {
+  assert.ok(screenScore(LIVE) < 2, `score ${screenScore(LIVE)}`);
+});
+
+test('real run: a phone playing a push-up video is', () => {
+  assert.ok(screenScore(PHONE_VIDEO) >= 2, `score ${screenScore(PHONE_VIDEO)}`);
 });

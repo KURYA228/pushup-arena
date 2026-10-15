@@ -15,7 +15,7 @@ import {
 } from '../lib/repDetector';
 import { openCamera, startVideo } from '../lib/camera';
 import { ScreenGuard, type GuardSnapshot } from '../lib/screenGuard';
-import { ScreenTells, tellsShowing, type BodyBox, type ScreenReadings, type TellName } from '../lib/screenTells';
+import { ScreenTells, screenScore, tellsShowing, type BodyBox, type ScreenReadings, type TellName } from '../lib/screenTells';
 
 // Loaded lazily on first camera use so the ~1.5MB MediaPipe JS never ships in the main bundle
 // for people who only use manual counting.
@@ -304,6 +304,8 @@ function smallFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement): Uint8Cl
 export interface ScreenCheck {
   readings: ScreenReadings | null;
   tells: TellName[];
+  /** What the guard goes by — 2 or more is a screen. */
+  score: number;
 }
 
 /**
@@ -364,7 +366,7 @@ export function usePoseDetection(onRep: () => void) {
   const [guardSnap, setGuardSnap] = useState<GuardSnapshot>(() => guard.snapshot());
   const tellsCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const tellsRef = useRef({ at: 0, tells: new ScreenTells() });
-  const [screenCheck, setScreenCheck] = useState<ScreenCheck>({ readings: null, tells: [] });
+  const [screenCheck, setScreenCheck] = useState<ScreenCheck>({ readings: null, tells: [], score: 0 });
 
   /** Until when the skeleton flashes bright green: the moment a rep has just counted. */
   const flashUntilRef = useRef(0);
@@ -536,8 +538,9 @@ export function usePoseDetection(onRep: () => void) {
                 if (px) {
                   const readings = st.tells.analyze(px, TELLS_W, TELLS_H, box);
                   const tells = tellsShowing(readings);
-                  setScreenCheck({ readings, tells });
-                  guard.look(tells.length, now);
+                  const score = screenScore(readings);
+                  setScreenCheck({ readings, tells, score });
+                  guard.look(score, now);
                   setGuardSnap(guard.snapshot());
                 }
               } catch {

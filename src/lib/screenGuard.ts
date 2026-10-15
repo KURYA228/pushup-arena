@@ -11,7 +11,7 @@
  */
 
 export interface GuardTuning {
-  /** Tells in one look that make it a "screen" look. */
+  /** Screen score (lib/screenTells.ts `screenScore`) in one look that makes it a "screen" look. */
   tellsPerLook: number;
   /** This many screen looks among the last `window` looks: stop counting. */
   engageLooks: number;
@@ -55,7 +55,7 @@ export class ScreenGuard {
     this.tuning = tuning;
   }
 
-  /** One look at the frame: how many screen tells showed in it. */
+  /** One look at the frame: its screen score (`screenScore`). */
   look(tells: number, now: number) {
     const screen = tells >= this.tuning.tellsPerLook;
     this.looks.push(screen);

@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { usePoseDetection, type ModelQuality } from '../hooks/usePoseDetection';
 import { cameraLooksHeadOn, type Strictness } from '../lib/repDetector';
-import { SCREEN_THRESHOLDS, type ScreenReadings, type TellName } from '../lib/screenTells';
+import { IGNORED_TELLS, SCREEN_THRESHOLDS, type ScreenReadings, type TellName } from '../lib/screenTells';
 import type { ScreenCheck } from '../hooks/usePoseDetection';
 import type { Feedback } from '../hooks/useFeedback';
 import { bumpClicker } from '../hooks/useProfile';
@@ -547,7 +547,12 @@ const TELL_ROWS: { tell: TellName; label: string; value: (r: ScreenReadings) => 
     value: (r) => `${r.glow.toFixed(2)} · края ${Math.round(r.edgeLuma)}`,
     limit: `≥${SCREEN_THRESHOLDS.glow} и края ≤${SCREEN_THRESHOLDS.maxEdgeLuma}`,
   },
-  { tell: 'border', label: 'Рамка', value: (r) => r.border.toFixed(2), limit: `≥${SCREEN_THRESHOLDS.border}` },
+  {
+    tell: 'border',
+    label: 'Рамка',
+    value: (r) => r.border.toFixed(2),
+    limit: `≥${SCREEN_THRESHOLDS.border} (≥${SCREEN_THRESHOLDS.borderStrong} — ×2)`,
+  },
   { tell: 'bands', label: 'Полосы', value: (r) => r.bands.toFixed(2), limit: `≥${SCREEN_THRESHOLDS.bands}` },
   { tell: 'moire', label: 'Муар', value: (r) => r.moire.toFixed(2), limit: `≥${SCREEN_THRESHOLDS.moire}` },
   { tell: 'glare', label: 'Блики', value: (r) => r.glare.toFixed(2), limit: `≥${SCREEN_THRESHOLDS.glare}` },
@@ -565,8 +570,8 @@ function ScreenMeter({ check }: { check: ScreenCheck }) {
     <div className="mb-3 rounded-xl border border-arena-border bg-arena-surface p-3 text-[11px]">
       <p className="mb-1.5 flex items-center justify-between text-arena-text-dim">
         <span>Замеры детектора экрана</span>
-        <span className={clsx('font-semibold', check.tells.length >= 3 ? 'text-arena-red' : check.tells.length >= 2 ? 'text-arena-amber' : 'text-arena-text')}>
-          признаков: {check.tells.length}
+        <span className={clsx('font-semibold', check.score >= 2 ? 'text-arena-red' : check.score >= 1 ? 'text-arena-amber' : 'text-arena-text')}>
+          очки: {check.score} {check.score >= 2 ? '— экран' : ''}
         </span>
       </p>
       {!r ? (
@@ -574,7 +579,8 @@ function ScreenMeter({ check }: { check: ScreenCheck }) {
       ) : (
         <div className="space-y-0.5 tabular-nums">
           {TELL_ROWS.map((row) => {
-            const on = check.tells.includes(row.tell);
+            const ignored = IGNORED_TELLS.includes(row.tell);
+            const on = check.tells.includes(row.tell) && !ignored;
             return (
               <div key={row.tell} className="flex items-baseline gap-2">
                 <span className={clsx('w-24 shrink-0', on ? 'font-semibold text-arena-red' : 'text-arena-text')}>
@@ -582,7 +588,7 @@ function ScreenMeter({ check }: { check: ScreenCheck }) {
                   {row.label}
                 </span>
                 <span className={clsx('flex-1', on ? 'text-arena-red' : 'text-arena-text')}>{row.value(r)}</span>
-                <span className="text-[10px] text-arena-text-dim">{row.limit}</span>
+                <span className="text-[10px] text-arena-text-dim">{ignored ? 'не учитывается' : row.limit}</span>
               </div>
             );
           })}
