@@ -21,7 +21,7 @@ import { HelpModal } from './HelpModal';
 import { HintCard } from './HintCard';
 import { InstallHint } from './InstallHint';
 import { useHint } from '../lib/hints';
-import { armDevGate, openDevPanel, tapCounter } from '../lib/devGate';
+import { openDevPanel, tapCounter } from '../lib/devGate';
 import { MAX_FREEZES, streakView, todayLocal } from '../lib/streak';
 
 type Derived = NonNullable<ReturnType<typeof useProfile>['derived']>;
@@ -55,8 +55,8 @@ export function HomeView({
   const [shopOpen, setShopOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [howtoVisible, dismissHowto] = useHint('howto');
-  // Step one of the two-step way into the dev panel (see devGate.ts). Silent on purpose.
-  const onTitleTap = useMemo(() => tapCounter(armDevGate), []);
+  // The way into the dev panel: five quick taps on the title (see devGate.ts).
+  const onTitleTap = useMemo(() => tapCounter(openDevPanel), []);
 
   return (
     <div className="arena-page pb-8 pt-6">
@@ -69,8 +69,8 @@ export function HomeView({
         >
           <CircleHelp size={18} />
         </button>
-        {/* Five quick taps here are step one of two into the dev panel (src/lib/devGate.ts);
-            step two is under "Начать Rush". Works against a production build on the phone. */}
+        {/* Five quick taps here open the dev panel (src/lib/devGate.ts). Works against a
+            production build on the phone. */}
         <button
           onClick={onTitleTap}
           className="text-xs uppercase tracking-widest text-arena-text-dim"

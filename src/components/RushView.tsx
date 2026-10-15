@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Flame, RefreshCw, Trophy, Zap } from 'lucide-react';
 import type { ProfileRecord, RepResult, RepUndo, ToastKind } from '../types';
@@ -11,7 +11,6 @@ import { GhostRace } from './GhostRace';
 import { DuelHud } from './DuelHud';
 import { DuelResult } from './DuelResult';
 import { DuelEntry, DuelMatching, DuelVersus } from './DuelLobby';
-import { tapCounter, tryOpenDevPanel } from '../lib/devGate';
 import { ghostAt } from '../lib/ghost';
 import { DUEL_DAILY_LIMIT, DUEL_START, duelOutcome, duelsToday, exhaustedToday, pickOpponent, sparringRun, type DuelOutcome } from '../data/duel';
 import type { DuelOpponent } from '../lib/cloud';
@@ -81,7 +80,6 @@ export function RushView({
   /** Floating "+1"s, one per rep. */
   const [pluses, setPluses] = useState<number[]>([]);
   const calm = useReducedMotion();
-  const devTap = useMemo(() => tapCounter(tryOpenDevPanel), []);
 
   /** When the clock started, and when each rep of this run landed — the next ghost if it wins. */
   const startedAtRef = useRef(0);
@@ -482,17 +480,6 @@ export function RushView({
           onFight={() => startSession('duel')}
           onAnother={() => void findRival()}
           onBack={() => setState('idle')}
-        />
-      )}
-      {/* Step two of the way into the dev panel: an invisible patch under the start button.
-          Not announced to screen readers and out of the tab order — it isn't a control. */}
-      {state === 'idle' && (
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-hidden
-          onClick={devTap}
-          className="mt-1 block h-12 w-full cursor-default opacity-0"
         />
       )}
 
