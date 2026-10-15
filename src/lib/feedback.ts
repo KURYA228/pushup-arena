@@ -161,6 +161,9 @@ const SAMPLES = {
   // Kiryukha's words in the finale, voiced: on the way into his fight, and on a rerun.
   kiryukhaTalk: 'sfx/kiryukha-talk.m4a',
   kiryukhaTalkRerun: 'sfx/kiryukha-talk-2.m4a',
+  // After "Камера снимает экран", the screen guard's stop (lib/screenGuard.ts). Background noise
+  // taken out with scripts/denoise.mjs; the original is in art/sfx.
+  cutCamera: 'sfx/cut-down-the-camera.m4a',
   // Lines a boss says as he walks out, one file each under sfx/lines/.
   lineKrabs: 'sfx/lines/krabs.m4a',
   lineEnder: 'sfx/lines/ender.m4a',
@@ -924,8 +927,9 @@ export function playBossDefeat(prefs: FeedbackPrefs) {
 }
 
 /**
- * The screen guard (lib/screenGuard.ts) has stopped counting: three low pips and the reason out
- * loud — the player is face down over the floor and won't see the banner.
+ * The screen guard (lib/screenGuard.ts) has stopped counting: three low pips, the reason out loud
+ * — the player is face down over the floor and won't see the banner — and then the recorded
+ * line, once the voice is done.
  */
 export function playScreenAlarm(prefs: FeedbackPrefs) {
   if (prefs.sound) {
@@ -935,13 +939,30 @@ export function playScreenAlarm(prefs: FeedbackPrefs) {
       tone(c, 330, 0.18, 0.12, 0.28);
       tone(c, 247, 0.36, 0.22, 0.28);
     }
-    sayRussian('Камера снимает экран. Повторы не считаются.');
+    sayRussian('Камера снимает экран. Повторы не считаются.', () => {
+      const after = audioContext();
+      if (after) playSample(after, 'cutCamera', 0.9, { exact: true });
+    });
   }
   buzz(prefs, [120, 80, 120, 80, 200]);
 }
 
-function sayRussian(text: string) {
-  if (!speechSupported()) return;
+/**
+ * Says a line in a Russian voice, then calls `then` — exactly once: when the voice ends, or after a
+ * generous guess at how long it would take, since iOS doesn't always report the end (and with no
+ * voice at all there's nothing to wait for).
+ */
+function sayRussian(text: string, then?: () => void) {
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    then?.();
+  };
+  if (!speechSupported()) {
+    window.setTimeout(finish, 600);
+    return;
+  }
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
@@ -949,9 +970,13 @@ function sayRussian(text: string) {
     const voice = window.speechSynthesis.getVoices().find((v) => /^ru/i.test(v.lang));
     if (voice) u.voice = voice;
     u.rate = 1.05;
+    u.onend = finish;
+    u.onerror = finish;
     window.speechSynthesis.speak(u);
+    window.setTimeout(finish, 600 + text.length * 90);
   } catch {
     // No voice — the pips and the banner on screen still say it.
+    window.setTimeout(finish, 600);
   }
 }
 
