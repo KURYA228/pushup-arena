@@ -172,6 +172,9 @@ const SAMPLES = {
   // After "Камера снимает экран", the screen guard's stop (lib/screenGuard.ts). Background noise
   // taken out with scripts/denoise.mjs; the original is in art/sfx.
   cutCamera: 'sfx/cut-down-the-camera.m4a',
+  // "Камера снимает экран. Повторы не считаются." — recorded (macOS `say -v Milena`) rather than
+  // spoken by speechSynthesis, which on the iPhone stayed silent when not started by a tap.
+  screenAlarmVoice: 'sfx/screen-alarm-voice.m4a',
   // Lines a boss says as he walks out, one file each under sfx/lines/.
   lineKrabs: 'sfx/lines/krabs.m4a',
   lineEnder: 'sfx/lines/ender.m4a',
@@ -937,7 +940,8 @@ export function playBossDefeat(prefs: FeedbackPrefs) {
 /**
  * The screen guard (lib/screenGuard.ts) has stopped counting: three low pips, the reason out loud
  * — the player is face down over the floor and won't see the banner — and then the recorded
- * line, once the voice is done.
+ * line. All of it from files, on the audio clock, one after the other; the browser's own voice is
+ * only the stand-in for a phrase that hasn't loaded yet.
  */
 export function playScreenAlarm(prefs: FeedbackPrefs) {
   if (prefs.sound) {
@@ -946,11 +950,16 @@ export function playScreenAlarm(prefs: FeedbackPrefs) {
       tone(c, 330, 0, 0.12, 0.28);
       tone(c, 330, 0.18, 0.12, 0.28);
       tone(c, 247, 0.36, 0.22, 0.28);
+      const voice = loaded.get('screenAlarmVoice');
+      if (voice && playSample(c, 'screenAlarmVoice', 1, { exact: true, delay: 0.65 })) {
+        playSample(c, 'cutCamera', 0.9, { exact: true, delay: 0.65 + voice.duration + 0.1 });
+      } else {
+        sayRussian('Камера снимает экран. Повторы не считаются.', () => {
+          const after = audioContext();
+          if (after) playSample(after, 'cutCamera', 0.9, { exact: true });
+        });
+      }
     }
-    sayRussian('Камера снимает экран. Повторы не считаются.', () => {
-      const after = audioContext();
-      if (after) playSample(after, 'cutCamera', 0.9, { exact: true });
-    });
   }
   buzz(prefs, [120, 80, 120, 80, 200]);
 }
